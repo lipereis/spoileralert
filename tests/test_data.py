@@ -7,7 +7,7 @@ from datetime import datetime
 from types import ModuleType
 from unittest.mock import patch
 
-from letterboxdpy.core.exceptions import PageLoadError
+from letterboxdpy.core.exceptions import AccessDeniedError, PageLoadError
 
 from spoileralert import data
 from spoileralert.data import normalize_year_diary
@@ -97,6 +97,20 @@ class FetchUserBoundaryTests(unittest.TestCase):
                 self.assertNotIn("library wrapper detail", str(exc))
             else:
                 self.fail("fetch_user did not raise for a chained timeout")
+
+    def test_access_denied_failure_becomes_domain_blocked_error(self):
+        def fake_user(_username):
+            raise AccessDeniedError("secret blocked url detail")
+
+        with _fake_letterboxd_user(fake_user):
+            try:
+                data.fetch_user("cinefan")
+            except Exception as exc:
+                self.assertIsInstance(exc, data.BlockedError)
+                self.assertNotIsInstance(exc, NetworkError)
+                self.assertNotIn("secret blocked url detail", str(exc))
+            else:
+                self.fail("fetch_user did not raise for an access-denied failure")
 
     def test_letterboxd_page_load_failure_becomes_domain_network_error(self):
         def fake_user(_username):
@@ -245,6 +259,21 @@ class RichDiaryTests(unittest.TestCase):
         entries = normalize_year_diary(payload, 2026)
 
         self.assertEqual([(entry.viewing_id, entry.title) for entry in entries], [("valid", "Arrival")])
+
+    def test_year_diary_access_denied_becomes_domain_blocked_error(self):
+        """Would fail if a Letterboxd IP block surfaced as a raw library exception."""
+        class FakeUser:
+            def get_diary_year(self, year: int):
+                raise AccessDeniedError("secret blocked diary url detail")
+
+        with patch.object(data, "fetch_user", return_value=FakeUser()):
+            try:
+                data.get_rich_diary_entries("cinefan")
+            except Exception as exc:
+                self.assertIsInstance(exc, data.BlockedError)
+                self.assertNotIn("secret blocked diary url detail", str(exc))
+            else:
+                self.fail("get_rich_diary_entries did not raise for an access-denied failure")
 
     def test_compatibility_adapter_returns_only_title_and_month_dictionaries(self):
         """Would fail if legacy consumers received rich objects or extra fields."""

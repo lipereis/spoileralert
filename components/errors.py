@@ -7,7 +7,7 @@ from html import escape
 
 import streamlit as st
 
-from spoileralert.data import EmptyDiaryError, NetworkError, ProfileNotFoundError
+from spoileralert.data import BlockedError, EmptyDiaryError, NetworkError, ProfileNotFoundError
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,13 @@ def map_exception(exc: Exception) -> UiError:
             "There is not enough diary activity yet.",
             "This profile has no public diary entries for the current year.",
             "Add a diary entry for this year on Letterboxd, then try again.",
+        )
+    if isinstance(exc, BlockedError):
+        return UiError(
+            "Letterboxd blocked this server.",
+            "Letterboxd's anti-bot protection is blocking requests from this "
+            "hosting provider's shared IP address, not from your account.",
+            "Try again later, or run SpoilerAlert on your own machine for reliable access.",
         )
     if isinstance(exc, (NetworkError, ConnectionError, TimeoutError)):
         return UiError(

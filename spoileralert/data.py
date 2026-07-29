@@ -14,6 +14,14 @@ class NetworkError(Exception):
     """Raised when Letterboxd cannot be reached reliably."""
 
 
+class BlockedError(Exception):
+    """Raised when Letterboxd actively refuses the request (e.g. an
+    anti-bot / datacenter-IP block), as opposed to a transient network
+    failure. Common on shared cloud hosts such as Streamlit Community
+    Cloud, whose outbound IPs Letterboxd sometimes blocks.
+    """
+
+
 class ProfileNotFoundError(Exception):
     """Raised when the username does not identify an available public profile."""
 
@@ -52,6 +60,17 @@ def _exception_chain(exc: BaseException):
                 pending.append(related)
 
 
+def _is_blocked_failure(exc: BaseException) -> bool:
+    """Classify Letterboxd's explicit access-denied response, distinct from
+    a transient network failure -- retrying immediately will not help.
+    """
+    try:
+        from letterboxdpy.core.exceptions import AccessDeniedError
+    except ImportError:
+        return False
+    return any(isinstance(current, AccessDeniedError) for current in _exception_chain(exc))
+
+
 def _is_network_failure(exc: BaseException) -> bool:
     """Classify only known transport failures across wrapper chains."""
     for current in _exception_chain(exc):
@@ -78,6 +97,10 @@ def fetch_user(username: str):
     try:
         user = User(username)
     except Exception as exc:  # letterboxdpy raises assorted errors on 404/private
+        if _is_blocked_failure(exc):
+            raise BlockedError(
+                "Letterboxd blocked this server's request while loading the profile."
+            ) from exc
         if _is_network_failure(exc):
             raise NetworkError(
                 "Could not reach Letterboxd while loading the profile."
@@ -276,6 +299,10 @@ def get_rich_diary_entries(username: str, year: int | None = None) -> list[Diary
     try:
         year_diary = user.get_diary_year(requested_year)
     except Exception as exc:
+        if _is_blocked_failure(exc):
+            raise BlockedError(
+                "Letterboxd blocked this server's request while loading the yearly diary."
+            ) from exc
         if _is_network_failure(exc):
             raise NetworkError(
                 "Could not reach Letterboxd while loading the yearly diary."

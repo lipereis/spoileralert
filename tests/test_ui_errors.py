@@ -4,7 +4,7 @@ from unittest.mock import patch
 import components.errors as errors
 from components.errors import UiError, map_exception, render_error
 from spoileralert import data
-from spoileralert.data import EmptyDiaryError, ProfileNotFoundError
+from spoileralert.data import BlockedError, EmptyDiaryError, ProfileNotFoundError
 
 
 class _MissingNetworkError(Exception):
@@ -39,6 +39,17 @@ class UiErrorTests(unittest.TestCase):
                 "There is not enough diary activity yet.",
                 "This profile has no public diary entries for the current year.",
                 "Add a diary entry for this year on Letterboxd, then try again.",
+            ),
+        )
+
+    def test_blocked_error_returns_complete_safe_copy(self):
+        self.assert_safe_mapping(
+            BlockedError("secret blocked url detail"),
+            UiError(
+                "Letterboxd blocked this server.",
+                "Letterboxd's anti-bot protection is blocking requests from this "
+                "hosting provider's shared IP address, not from your account.",
+                "Try again later, or run SpoilerAlert on your own machine for reliable access.",
             ),
         )
 
