@@ -154,6 +154,33 @@ when a title is missing or ambiguous, the complete Letterboxd overview and
 timeline still work and all six cards still exist. Metadata-dependent cards
 show limited-data or unavailable-data copy rather than unsupported claims.
 
+## When Letterboxd blocks the server
+
+Letterboxd's anti-bot protection answers some requests with HTTP 403, most
+often when they come from a shared cloud IP address such as Streamlit
+Community Cloud's. This is a property of the host, not of the submitted
+profile or of any account. Those responses become a dedicated `BlockedError`
+and a specific error panel naming the hosting provider's address as the cause,
+instead of the generic unexpected-failure copy. Retrying immediately does not
+help, so the copy does not suggest it.
+
+The landing page's **Blocked by Letterboxd? Upload your diary export instead**
+expander is the supported way through an active block. Export your data from
+Letterboxd's **Settings → Import & Export → Export Your Data**, then upload the
+`diary.csv` file from the emailed ZIP. Parsing is local and makes no network
+request, so it keeps working while scraping is blocked, and it produces the same
+six cards and ZIP.
+
+The reader requires the `Name` and `Date` columns and additionally reads
+`Watched Date`, `Year`, `Letterboxd URI`, `Rating`, and `Rewatch` when present.
+`Watched Date` wins over `Date` for a row that has both, because bulk-imported
+rows record the import moment in `Date` rather than the viewing date. A leading
+UTF-8 byte-order mark is tolerated. Only rows inside the current
+calendar year are counted; rows without a title or with an unparseable date are
+skipped. The display name is optional, labels the cards only, and defaults to
+`you`. A file without the expected columns raises `InvalidCsvError` and is
+reported as a wrong-file error rather than an empty diary.
+
 ## Stack and project layout
 
 - **Streamlit 1.60.0+** — UI and per-session workflow
@@ -165,7 +192,7 @@ show limited-data or unavailable-data copy rather than unsupported claims.
 ```text
 app.py                     Streamlit coordinator
 components/                Landing, loading, error, and result gallery UI
-spoileralert/data.py       Full-year Letterboxd diary normalization
+spoileralert/data.py       Full-year Letterboxd diary and diary.csv normalization
 spoileralert/metadata.py   Optional TMDB matching and enrichment
 spoileralert/analysis.py   Overview, DNA, director, and timeline analysis
 spoileralert/personality.py
@@ -227,6 +254,10 @@ that the Letterboxd profile is public and has a current-year diary entry, and
 that the optional TMDB secret name is exactly `TMDB_API_KEY`. TMDB coverage can
 still be incomplete because some titles are absent or ambiguous; that is an
 expected limitation, not a reason to invent data.
+
+A TMDB key does not affect Letterboxd availability. TMDB only enriches films
+already read from a diary, so a deployment that Letterboxd is blocking with 403
+responses needs the `diary.csv` upload path described above, not a key.
 
 ## Privacy and limitations
 
