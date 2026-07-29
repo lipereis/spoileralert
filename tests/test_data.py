@@ -179,6 +179,26 @@ class FullYearDiaryTests(unittest.TestCase):
 
 
 class RichDiaryTests(unittest.TestCase):
+    def test_normalization_accepts_letterboxd_utc_datetime_dates(self):
+        """Would fail when real letterboxdpy timestamps are treated as malformed."""
+        payload = {
+            "entries": {
+                "1416315797": {
+                    "name": "To Die For",
+                    "release": 1995,
+                    "slug": "to-die-for",
+                    "date": "2026-07-26T00:00:00.000000Z",
+                    "actions": {"rating": 3.5, "rewatched": False},
+                }
+            }
+        }
+
+        entries = normalize_year_diary(payload, 2026)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].watched_on.isoformat(), "2026-07-26")
+        self.assertEqual(entries[0].title, "To Die For")
+
     def test_full_year_preserves_distinct_viewings_dates_ratings_and_rewatches(self):
         """Would fail if repeated films were deduplicated or rich values discarded."""
         payload = {

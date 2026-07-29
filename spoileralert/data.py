@@ -194,6 +194,17 @@ def _optional_rewatch(value: Any) -> bool | None:
     return None
 
 
+def _watched_date(value: str) -> date | None:
+    """Parse Letterboxd's plain dates and letterboxdpy UTC timestamps."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+
+
 def normalize_year_diary(year_diary: dict, current_year: int) -> list[DiaryEntry]:
     """Turn a complete Letterboxd diary response into validated viewings.
 
@@ -216,9 +227,8 @@ def normalize_year_diary(year_diary: dict, current_year: int) -> list[DiaryEntry
         date_text = entry.get("date")
         if not isinstance(title, str) or not title.strip() or not isinstance(date_text, str):
             continue
-        try:
-            watched_on = date.fromisoformat(date_text)
-        except ValueError:
+        watched_on = _watched_date(date_text)
+        if watched_on is None:
             continue
         if watched_on.year != current_year:
             continue
