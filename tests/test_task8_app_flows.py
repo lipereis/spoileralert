@@ -17,6 +17,7 @@ def _run_fixture_app() -> None:
     import app as app_module
     from spoileralert.data import ProfileNotFoundError
     from spoileralert.models import DiaryEntry, EnrichedViewing, MovieMetadata
+    from spoileralert.rss import DiaryFeed
     from tests.test_card_renderers import enhanced_fixture
 
     scenario = st.session_state.get("_task8_scenario", "valid")
@@ -47,7 +48,12 @@ def _run_fixture_app() -> None:
     def fetch_diary(_username: str):
         if scenario == "invalid":
             raise ProfileNotFoundError("raw upstream profile detail")
-        return (entry,)
+        return DiaryFeed(
+            entries=(entry,),
+            year=date.today().year,
+            diary_item_count=1,
+            truncated=scenario == "truncated-feed",
+        )
 
     def api_key(_secrets):
         return None if scenario == "no-key" else "fixture-key"
@@ -61,7 +67,7 @@ def _run_fixture_app() -> None:
         )
 
     with (
-        patch.object(app_module, "get_rich_diary_entries", side_effect=fetch_diary),
+        patch.object(app_module, "fetch_diary_feed", side_effect=fetch_diary),
         patch.object(app_module, "get_tmdb_api_key", side_effect=api_key),
         patch.object(app_module, "enrich_diary_entries", side_effect=enrich),
         patch.object(app_module, "compute_enhanced_stats", return_value=enhanced_fixture()),
@@ -156,7 +162,7 @@ def _run_csv_app() -> None:
         raise AssertionError("the upload path must not reach Letterboxd")
 
     with (
-        patch.object(app_module, "get_rich_diary_entries", side_effect=refuse_scraping),
+        patch.object(app_module, "fetch_diary_feed", side_effect=refuse_scraping),
         patch.object(app_module, "get_tmdb_api_key", return_value=None),
         patch.object(app_module.logging, "warning"),
     ):
@@ -173,7 +179,7 @@ def _run_demo_app() -> None:
         raise AssertionError("the sample must not reach Letterboxd")
 
     with (
-        patch.object(app_module, "get_rich_diary_entries", side_effect=refuse_scraping),
+        patch.object(app_module, "fetch_diary_feed", side_effect=refuse_scraping),
         patch.object(app_module, "get_tmdb_api_key", return_value=None),
         patch.object(app_module.logging, "warning"),
     ):
@@ -227,6 +233,20 @@ class Task8AppFlowTests(unittest.TestCase):
                 "Generate My Wrapped",
             ],
         )
+
+    def test_a_feed_capped_year_says_so_on_the_result_itself(self):
+        """Would fail if a recap built from recent activity alone reached the
+        screen claiming to be the whole year.
+        """
+        capped = _submitted_app("truncated-feed")
+        self.assertEqual([exception.message for exception in capped.exception], [])
+        self.assertEqual(capped.session_state["stage"], "result")
+        shown = "\n".join(element.value for element in capped.info)
+        self.assertIn("Earlier", shown)
+        self.assertIn("export", shown)
+
+        whole = _submitted_app("valid")
+        self.assertEqual([element.value for element in whole.info], [])
 
     def test_invalid_profile_enters_safe_error_without_leaking_upstream_text(self):
         app = _submitted_app("invalid")

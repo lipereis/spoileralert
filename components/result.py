@@ -159,8 +159,13 @@ def _prepare_card_index(card_count: int) -> int:
 def render_result(
     stats: WrappedStats | EnhancedWrappedStats,
     cards: bytes | Sequence[RenderedCard],
+    coverage_note: str | None = None,
 ) -> bool:
-    """Render the completed story and report whether a reset was requested."""
+    """Render the completed story and report whether a reset was requested.
+
+    `coverage_note` states that the source could not supply the whole year, so
+    a partial recap is never presented as a complete one.
+    """
     overview = _overview(stats)
     if isinstance(cards, bytes):
         return _render_legacy_result(overview, cards)
@@ -168,6 +173,8 @@ def render_result(
     ordered = _validated_cards(cards)
     st.session_state["wrapped_cards"] = ordered
     _render_header_and_metrics(overview)
+    if coverage_note:
+        st.info(coverage_note, icon=":material/info:")
     _prepare_card_index(len(ordered))
 
     with st.container(key="card-selector"):

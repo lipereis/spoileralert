@@ -11,6 +11,7 @@ with patch.object(streamlit, "set_page_config"):
 
 from spoileralert.data import ProfileNotFoundError
 from spoileralert.models import DiaryEntry, EnrichedViewing, RenderedCard
+from spoileralert.rss import DiaryFeed
 
 
 class _Progress:
@@ -63,6 +64,16 @@ def _entry() -> DiaryEntry:
     )
 
 
+def _feed(entries: tuple[DiaryEntry, ...]) -> DiaryFeed:
+    """Wrap viewings as a complete-year feed read, the common case."""
+    return DiaryFeed(
+        entries=entries,
+        year=2026,
+        diary_item_count=len(entries),
+        truncated=False,
+    )
+
+
 def _cards() -> tuple[RenderedCard, ...]:
     slugs = ("overview", "personality", "movie-dna", "moods", "directors", "timeline")
     return tuple(
@@ -82,7 +93,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
         stats = object()
 
         def enrich(actual_entries, api_key):
-            self.assertIs(actual_entries, entries)
+            self.assertEqual(actual_entries, list(entries))
             self.assertIsNone(api_key)
             self.assertTrue(actual_entries[0].rewatched)
             self.assertEqual(actual_entries[0].watched_on, date(2026, 12, 31))
@@ -92,7 +103,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(status, progress)),
             patch.object(app, "get_tmdb_api_key", return_value=None) as key,
-            patch.object(app, "get_rich_diary_entries", return_value=entries),
+            patch.object(app, "fetch_diary_feed", return_value=_feed(entries)),
             patch.object(app, "enrich_diary_entries", side_effect=enrich),
             patch.object(app, "compute_enhanced_stats", return_value=stats),
             patch.object(app, "render_story_cards", return_value=_cards()),
@@ -116,7 +127,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
 
         def analyze(username, actual_entries, enriched):
             self.assertEqual(username, "cinefan")
-            self.assertIs(actual_entries, entries)
+            self.assertEqual(actual_entries, list(entries))
             self.assertEqual(enriched, (EnrichedViewing(entries[0], None),))
             return stats
 
@@ -124,7 +135,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(status, progress)),
             patch.object(app, "get_tmdb_api_key", return_value="do-not-log-this"),
-            patch.object(app, "get_rich_diary_entries", return_value=entries),
+            patch.object(app, "fetch_diary_feed", return_value=_feed(entries)),
             patch.object(
                 app,
                 "enrich_diary_entries",
@@ -154,7 +165,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(_Status(), _Progress())),
             patch.object(app, "get_tmdb_api_key", return_value=None),
-            patch.object(app, "get_rich_diary_entries", return_value=entries),
+            patch.object(app, "fetch_diary_feed", return_value=_feed(entries)),
             patch.object(app, "enrich_diary_entries", return_value=enriched),
             patch.object(app, "compute_enhanced_stats", return_value=object()),
             patch.object(app, "render_story_cards", return_value=_cards()[:-1]),
@@ -179,7 +190,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(_Status(), _Progress())),
             patch.object(app, "get_tmdb_api_key", return_value=None),
-            patch.object(app, "get_rich_diary_entries", return_value=entries),
+            patch.object(app, "fetch_diary_feed", return_value=_feed(entries)),
             patch.object(app, "enrich_diary_entries", return_value=enriched),
             patch.object(app, "compute_enhanced_stats", return_value=object()),
             patch.object(
@@ -205,7 +216,7 @@ class EnhancedAppFlowTests(unittest.TestCase):
             patch.object(app, "render_loading_shell", return_value=(_Status(), _Progress())),
             patch.object(
                 app,
-                "get_rich_diary_entries",
+                "fetch_diary_feed",
                 side_effect=ProfileNotFoundError("raw external profile detail"),
             ),
             patch.object(app, "enrich_diary_entries") as enrich,

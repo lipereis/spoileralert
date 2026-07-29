@@ -174,10 +174,12 @@ class LandingComponentTests(unittest.TestCase):
                 ("markdown", True),
             ],
         )
-        self.assertIn(
-            "run SpoilerAlert on your own machine",
-            "".join(body for body, _ in submitted.markdown_calls),
-        )
+        # The feed works from any host but carries only recent activity, so the
+        # form must promise the reach it actually has.
+        promise = "".join(body for body, _ in submitted.markdown_calls)
+        self.assertIn("public RSS feed", promise)
+        self.assertIn("recent activity", promise)
+        self.assertNotIn("run SpoilerAlert on your own machine", promise)
 
         intro, trust = (body for body, _ in submitted.markdown_calls)
         self.assertIn('class="generator-panel__intro"', intro)
@@ -293,11 +295,11 @@ class LandingComponentTests(unittest.TestCase):
         self.assertEqual(handles, (st.status_handle, st.progress_handle))
         self.assertEqual(
             st.status_calls,
-            [("Opening your complete Letterboxd diary…", {"expanded": True})],
+            [("Opening your Letterboxd diary…", {"expanded": True})],
         )
         self.assertEqual(
             st.progress_calls,
-            [(0, {"text": "Preparing the complete-year analysis"})],
+            [(0, {"text": "Preparing your analysis"})],
         )
 
 

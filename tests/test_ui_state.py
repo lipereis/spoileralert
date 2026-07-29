@@ -39,6 +39,18 @@ class UiStateTests(unittest.TestCase):
         begin_generation(state, "cinefan")
         self.assertIsNone(state["diary_csv_bytes"])
 
+    def test_begin_generation_clears_a_previous_runs_coverage_note(self):
+        """Would fail if a complete export inherited the feed's partial-year
+        warning from an earlier run.
+        """
+        state = {}
+        initialize_state(state)
+        state["coverage_note"] = "Only recent activity was available."
+
+        begin_generation(state, "cinefan", b"Date,Name\n2026-01-01,Arrival\n")
+
+        self.assertIsNone(state["coverage_note"])
+
     def test_generation_result_and_reset_lifecycle(self):
         state = {}
         initialize_state(state)
@@ -55,6 +67,7 @@ class UiStateTests(unittest.TestCase):
                 "wrapped_cards": (),
                 "selected_card_index": 0,
                 "diary_csv_bytes": None,
+                "coverage_note": None,
             },
         )
 
@@ -80,6 +93,7 @@ class UiStateTests(unittest.TestCase):
                 "wrapped_cards": (),
                 "selected_card_index": 0,
                 "diary_csv_bytes": None,
+                "coverage_note": None,
             },
         )
 

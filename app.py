@@ -25,7 +25,7 @@ from components.layout import (
 )
 from components.result import CARD_SLUG_ORDER, render_result
 from spoileralert.analysis import compute_enhanced_stats
-from spoileralert.data import get_rich_diary_entries, get_rich_diary_entries_from_csv
+from spoileralert.data import get_rich_diary_entries_from_csv
 from spoileralert.metadata import (
     enrich_diary_entries,
     get_tmdb_api_key,
@@ -34,6 +34,7 @@ from spoileralert.metadata import (
 )
 from spoileralert.models import EnrichedViewing, MovieMetadata
 from spoileralert.render import render_story_cards
+from spoileralert.rss import fetch_diary_feed
 from spoileralert.sample import SAMPLE_DISPLAY_NAME, sample_diary_csv_bytes
 from spoileralert.ui_state import (
     begin_generation,
@@ -183,15 +184,20 @@ def _run_generation() -> None:
     try:
         status, progress = render_loading_shell()
         status.update(
-            label="Opening your complete Letterboxd diary…",
+            label="Opening your Letterboxd diary…",
             state="running",
             expanded=True,
         )
         if diary_csv_bytes is not None:
             entries = get_rich_diary_entries_from_csv(diary_csv_bytes)
         else:
-            entries = get_rich_diary_entries(username)
-        progress.progress(25, text="Complete diary loaded")
+            # Letterboxd's public feed is the only username-only route that
+            # works from a shared cloud address, at the cost of covering
+            # recent activity rather than a guaranteed whole year.
+            feed = fetch_diary_feed(username)
+            entries = list(feed.entries)
+            st.session_state["coverage_note"] = feed.coverage_note
+        progress.progress(25, text="Diary loaded")
 
         status.update(
             label="Adding optional film details…",
@@ -269,7 +275,8 @@ def _render_result_stage() -> None:
     except KeyError:
         cards = ()
     result_payload = cards or st.session_state["image_bytes"]
-    if render_result(st.session_state["stats"], result_payload):
+    coverage_note = st.session_state.get("coverage_note")
+    if render_result(st.session_state["stats"], result_payload, coverage_note):
         reset_generation(st.session_state)
         st.rerun()
 

@@ -28,6 +28,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "wrapped_cards": (),
     "selected_card_index": 0,
     "diary_csv_bytes": None,
+    "coverage_note": None,
 }
 
 
@@ -53,6 +54,7 @@ def begin_generation(
     state["wrapped_cards"] = ()
     state["selected_card_index"] = 0
     state["diary_csv_bytes"] = diary_csv_bytes
+    state["coverage_note"] = None
 
 
 def set_result(state: SessionLike, stats: Any, cards: Any) -> None:

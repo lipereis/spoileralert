@@ -1,11 +1,12 @@
 # SpoilerAlert 🎬
 
-SpoilerAlert turns a complete current-calendar-year Letterboxd diary into a
-deterministic cinema recap, reading it from a bundled sample, an uploaded
-`diary.csv` export, or a public profile. Every run is analyzed independently,
-every diary viewing is counted, and rewatches remain separate viewings. A
-successful run produces six shareable 1080×1920 PNG cards and one in-memory ZIP
-containing those exact files.
+SpoilerAlert turns a current-calendar-year Letterboxd diary into a deterministic
+cinema recap, reading it from a bundled sample, a public username, or an uploaded
+`diary.csv` export. Every run is analyzed independently, every diary viewing it
+reads is counted, and rewatches remain separate viewings. A successful run
+produces six shareable 1080×1920 PNG cards and one in-memory ZIP containing those
+exact files. When the source can only supply part of the year, the result says so
+rather than presenting a partial recap as a complete one.
 
 ## What the analysis means
 
@@ -157,16 +158,15 @@ show limited-data or unavailable-data copy rather than unsupported claims.
 
 ## Three ways in
 
-The landing page offers its entry points in order of how dependable they are:
+The landing page offers three entry points, and all three work from any host:
 
 1. **See a sample Wrapped** renders the complete six-card story from a bundled
    demo diary. It needs no account, no export, and no reachable Letterboxd, so
    the deployed link always demonstrates itself in one click.
 2. **Upload your Letterboxd export** reads a `diary.csv` locally and never
-   contacts Letterboxd, so it works on any host.
-3. **Enter a Letterboxd username** reads a live public profile. This depends on
-   Letterboxd answering the machine the app runs on, which holds when you run it
-   locally but frequently fails on shared cloud addresses.
+   contacts Letterboxd. It is the only route guaranteed to cover a whole year.
+3. **Enter a Letterboxd username** reads the member's public RSS feed. Typing a
+   name is all it takes, at the cost of the feed's reach: see below.
 
 The sample is emitted as a Letterboxd export and parsed by the same reader an
 upload uses, so a demo run exercises the real parsing, analysis, and rendering
@@ -174,14 +174,43 @@ path rather than a separate fixture. Its watch dates are anchored to the running
 year and spread across the elapsed part of it, so the demo never shows viewings
 dated in the future and never ages out of the current-year scope.
 
+## The username path reads the public feed
+
+Letterboxd does not issue API keys for visualization projects, and it answers
+page scraping from shared cloud addresses with HTTP 403. The per-member RSS feed
+at `https://letterboxd.com/<username>/rss/` is the machine-readable route
+Letterboxd itself publishes, and it is served to hosts that scraping is refused
+from. That is what makes a username alone enough on a deployed link.
+
+The feed's limit is reach rather than availability: it carries recent activity,
+roughly the last fifty entries, instead of a whole diary. So the username path
+can only see part of a busy year, and saying otherwise would be the kind of
+invented number the analysis avoids everywhere else.
+
+`DiaryFeed.truncated` records exactly that risk. When every diary item the feed
+returned falls inside the requested year, older viewings from that year have
+probably dropped off the end of it, and the result page states so above the
+cards and points at the export. When the feed still reaches back into last
+year, the year it returned is provably whole and nothing is claimed.
+
+Feed items that are not viewings, such as published lists, carry no film title
+or watched date and are skipped rather than counted. Rewatch permalinks like
+`/film/parasite-2019/1/` still resolve to one film slug, an absent rating stays
+absent instead of becoming a zero, and an unreadable watched date drops the row
+rather than guessing at it. A private or misspelled profile answers 404 and
+becomes `ProfileNotFoundError`; a refused feed answers 403 and becomes
+`BlockedError`, which still offers the upload as described below.
+
 ## When Letterboxd blocks the server
 
 Letterboxd's anti-bot protection answers some requests with HTTP 403, most
 often when they come from a shared cloud IP address such as Streamlit
 Community Cloud's. This is a property of the host, not of the submitted
-profile or of any account. Those responses become a dedicated `BlockedError`
-and a specific error panel naming the hosting provider's address as the cause,
-instead of the generic unexpected-failure copy.
+profile or of any account. The public feed is normally served where scraping is
+not, so this is now the exception rather than the rule on the username path.
+Those responses still become a dedicated `BlockedError` and a specific error
+panel naming the hosting provider's address as the cause, instead of the generic
+unexpected-failure copy.
 
 Because a retry reruns the same blocked request, a block never offers a bare
 retry as its only action. The error panel renders the diary-export upload
@@ -211,14 +240,17 @@ reported as a wrong-file error rather than an empty diary.
 ## Stack and project layout
 
 - **Streamlit 1.60.0+** — UI and per-session workflow
-- **letterboxdpy** — public Letterboxd profile and yearly-diary retrieval
-- **requests** — optional TMDB REST requests with explicit timeouts
+- **requests** — public Letterboxd RSS reads and optional TMDB REST requests,
+  both with explicit timeouts
+- **xml.etree.ElementTree** — standard-library RSS parsing
+- **letterboxdpy** — full-year diary retrieval, available for local runs
 - **pandas** — overview aggregation
 - **Pillow** — deterministic 1080×1920 RGB PNG rendering
 
 ```text
 app.py                     Streamlit coordinator
 components/                Landing, loading, error, and result gallery UI
+spoileralert/rss.py        Username path: public RSS reads and coverage honesty
 spoileralert/data.py       Full-year Letterboxd diary and diary.csv normalization
 spoileralert/sample.py     Bundled demo diary emitted as a Letterboxd export
 spoileralert/metadata.py   Optional TMDB matching and enrichment
@@ -285,13 +317,17 @@ expected limitation, not a reason to invent data.
 
 A TMDB key does not affect Letterboxd availability. TMDB only enriches films
 already read from a diary, so a deployment that Letterboxd is blocking with 403
-responses needs the `diary.csv` upload path described above, not a key.
+responses needs the public-feed or `diary.csv` paths described above, not a key.
 
 ## Privacy and limitations
 
-- Only public Letterboxd profile information is read, and an uploaded export is
-  parsed in memory for that session alone. Diary data, results, and card bytes
-  live in the active Streamlit session and are not permanently stored.
+- Only public Letterboxd information is read — a member's public RSS feed for the
+  username path — and an uploaded export is parsed in memory for that session
+  alone. Diary data, results, and card bytes live in the active Streamlit session
+  and are not permanently stored.
+- The username path sees recent activity rather than a guaranteed whole year, and
+  says so on the result when the year it read may be cut off. Upload the export
+  for a complete year.
 - The sample diary is bundled demo content in `spoileralert/sample.py`. It is
   not anyone's real viewing history.
 - Movie enrichment is deduplicated by normalized title and release year within

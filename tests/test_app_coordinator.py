@@ -11,6 +11,7 @@ with patch.object(streamlit, "set_page_config"):
 from components.errors import UiError
 from spoileralert.data import parse_diary_csv
 from spoileralert.models import RenderedCard
+from spoileralert.rss import DiaryFeed
 
 
 class _ProgressHandle:
@@ -65,7 +66,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "render_sample_button", return_value=False),
             patch.object(app, "render_features"),
             patch.object(app, "render_footer"),
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
 
@@ -98,7 +99,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "render_features"),
             patch.object(app, "render_footer"),
             patch.object(app, "render_loading_shell", return_value=(_StatusHandle(), _ProgressHandle())),
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
             app.render_current_stage()
@@ -133,7 +134,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "render_generator_form", return_value=None),
             patch.object(app, "render_features"),
             patch.object(app, "render_footer"),
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
 
@@ -171,11 +172,16 @@ class AppCoordinatorTests(unittest.TestCase):
         def fetch(username):
             operation_order.append("diary")
             self.assertEqual(username, "cinefan")
-            return entries
+            return DiaryFeed(
+                entries=entries,  # type: ignore[arg-type]
+                year=2026,
+                diary_item_count=len(entries),
+                truncated=False,
+            )
 
         def enrich(actual_entries, api_key, *, lookup):
             operation_order.append("enrich")
-            self.assertIs(actual_entries, entries)
+            self.assertEqual(actual_entries, list(entries))
             self.assertEqual(api_key, "tmdb-key")
             self.assertIs(lookup, app.lookup_cached_movie_metadata_with_key)
             return enriched
@@ -183,7 +189,7 @@ class AppCoordinatorTests(unittest.TestCase):
         def compute(username, actual_entries, actual_enriched):
             operation_order.append("analyze")
             self.assertEqual(username, "cinefan")
-            self.assertIs(actual_entries, entries)
+            self.assertEqual(actual_entries, list(entries))
             self.assertIs(actual_enriched, enriched)
             return stats
 
@@ -196,7 +202,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(status, progress)),
             patch.object(app, "get_tmdb_api_key", return_value="tmdb-key") as key,
-            patch.object(app, "get_rich_diary_entries", side_effect=fetch),
+            patch.object(app, "fetch_diary_feed", side_effect=fetch),
             patch.object(app, "enrich_diary_entries", side_effect=enrich),
             patch.object(app, "compute_enhanced_stats", side_effect=compute),
             patch.object(app, "render_story_cards", side_effect=render),
@@ -214,8 +220,73 @@ class AppCoordinatorTests(unittest.TestCase):
         self.assertIsNone(state["image_bytes"])
         self.assertEqual(state["wrapped_cards"], cards)
         key.assert_called_once_with(st.secrets)
-        result_view.assert_called_once_with(stats, cards)
+        result_view.assert_called_once_with(stats, cards, None)
         self.assertEqual(st.rerun_calls, 1)
+
+    def _run_feed_generation(self, feed: DiaryFeed, *, csv_bytes: bytes | None = None):
+        """Drive one generation from a given source and return the result call."""
+        state = {
+            "stage": "generating",
+            "username": "cinefan",
+            "stats": None,
+            "image_bytes": None,
+            "ui_error": None,
+            "diary_csv_bytes": csv_bytes,
+            "coverage_note": None,
+        }
+        st = _AppStreamlitDouble(state)
+        slugs = ("overview", "personality", "movie-dna", "moods", "directors", "timeline")
+        cards = tuple(RenderedCard(slug, slug, f"{slug}.png", b"png") for slug in slugs)
+
+        with (
+            patch.object(app, "st", st),
+            patch.object(
+                app,
+                "render_loading_shell",
+                return_value=(_StatusHandle(), _ProgressHandle()),
+            ),
+            patch.object(app, "get_tmdb_api_key", return_value=None),
+            patch.object(app, "fetch_diary_feed", return_value=feed),
+            patch.object(app, "get_rich_diary_entries_from_csv", return_value=[object()]),
+            patch.object(app, "enrich_diary_entries", return_value=()),
+            patch.object(app, "compute_enhanced_stats", return_value=object()),
+            patch.object(app, "render_story_cards", return_value=cards),
+            patch.object(app, "render_result", return_value=False) as result_view,
+        ):
+            app.render_current_stage()
+            app.render_current_stage()
+
+        return result_view
+
+    def test_a_truncated_feed_tells_the_result_its_year_is_incomplete(self):
+        """Would fail if a recap built from recent activity alone were presented
+        as a complete year.
+        """
+        truncated = DiaryFeed(
+            entries=(object(),),  # type: ignore[arg-type]
+            year=2026,
+            diary_item_count=50,
+            truncated=True,
+        )
+
+        result_view = self._run_feed_generation(truncated)
+
+        note = result_view.call_args.args[2]
+        self.assertEqual(note, truncated.coverage_note)
+        self.assertIn("2026", note)
+
+    def test_an_uploaded_export_carries_no_partial_year_warning(self):
+        """Would fail if a complete export inherited the feed's caveat."""
+        unread_feed = DiaryFeed(
+            entries=(object(),),  # type: ignore[arg-type]
+            year=2026,
+            diary_item_count=50,
+            truncated=True,
+        )
+
+        result_view = self._run_feed_generation(unread_feed, csv_bytes=b"Date,Name\n")
+
+        self.assertIsNone(result_view.call_args.args[2])
 
     def test_generation_exception_is_logged_and_mapped_without_raw_text(self):
         state = {
@@ -233,7 +304,7 @@ class AppCoordinatorTests(unittest.TestCase):
         with (
             patch.object(app, "st", st),
             patch.object(app, "render_loading_shell", return_value=(status, progress)),
-            patch.object(app, "get_rich_diary_entries", side_effect=failure),
+            patch.object(app, "fetch_diary_feed", side_effect=failure),
             patch.object(app.logging, "exception") as log_exception,
         ):
             app.render_current_stage()
@@ -286,7 +357,7 @@ class AppCoordinatorTests(unittest.TestCase):
         with (
             patch.object(app, "st", st),
             patch.object(app, "render_result", return_value=True),
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
 
@@ -307,7 +378,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "st", st),
             patch.object(app, "render_error") as error_view,
             patch.object(app, "render_footer") as footer,
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
 
@@ -383,7 +454,7 @@ class AppCoordinatorTests(unittest.TestCase):
                 "render_csv_uploader_form",
                 return_value=("  @Cinefan  ", b"Date,Name\n2026-01-01,Arrival\n"),
             ),
-            patch.object(app, "get_rich_diary_entries", fetch),
+            patch.object(app, "fetch_diary_feed", fetch),
         ):
             app.render_current_stage()
 

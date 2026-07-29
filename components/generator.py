@@ -38,10 +38,11 @@ def render_generator_form() -> str | None:
           <section class="generator-panel__intro">
             <p class="generator-panel__eyebrow">YOUR DIARY, DIRECTED</p>
             <h2>Ready for your close-up?</h2>
-            <p>Enter a public Letterboxd username to turn this year's complete diary into a cinematic story.</p>
-            <p>Reading a live profile needs a host Letterboxd is willing to answer.
-            It works when you run SpoilerAlert on your own machine, but shared cloud
-            addresses are often refused — use the diary export above there.</p>
+            <p>Enter a public Letterboxd username to turn this year's diary into a cinematic story.</p>
+            <p>This reads your profile's public RSS feed, which Letterboxd publishes
+            for exactly this purpose. The feed carries recent activity rather than a
+            whole diary, so a busy year can be cut off — we say so on the result when
+            that happens, and the export above always covers the full year.</p>
           </section>
             """,
             unsafe_allow_html=True,
@@ -125,11 +126,11 @@ def render_loading_shell() -> tuple[Any, Any]:
         <section class="loading-shell" aria-labelledby="loading-title">
           <p class="loading-shell__eyebrow">NOW SCREENING</p>
           <h1 id="loading-title">Your Wrapped is in the editing room.</h1>
-          <p>We are reading the complete year, checking optional film details, and shaping six story cards.</p>
+          <p>We are reading your diary, checking optional film details, and shaping six story cards.</p>
         </section>
         """,
         unsafe_allow_html=True,
     )
-    status = st.status("Opening your complete Letterboxd diary…", expanded=True)
-    progress = st.progress(0, text="Preparing the complete-year analysis")
+    status = st.status("Opening your Letterboxd diary…", expanded=True)
+    progress = st.progress(0, text="Preparing your analysis")
     return status, progress
