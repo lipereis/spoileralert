@@ -1,0 +1,19 @@
+{
+  "include": [
+    "app.py",
+    "components",
+    "spoileralert",
+    "tests"
+  ],
+  "exclude": [
+    ".venv",
+    ".venv-1",
+    ".superpowers",
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    "."
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}

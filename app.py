@@ -1,0 +1,272 @@
+"""Four-stage Streamlit coordinator for SpoilerAlert."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+import streamlit as st
+
+from components.errors import IncompleteStoryError, UiError, map_exception, render_error
+from components.generator import render_generator_form, render_loading_shell
+from components.layout import (
+    load_styles,
+    render_features,
+    render_footer,
+    render_header,
+    render_hero,
+)
+from components.result import CARD_SLUG_ORDER, render_result
+from spoileralert.analysis import compute_enhanced_stats
+from spoileralert.data import get_rich_diary_entries
+from spoileralert.metadata import (
+    enrich_diary_entries,
+    get_tmdb_api_key,
+    lookup_movie_metadata,
+    normalize_title,
+)
+from spoileralert.models import EnrichedViewing, MovieMetadata
+from spoileralert.render import render_story_cards
+from spoileralert.ui_state import (
+    begin_generation,
+    initialize_state,
+    reset_generation,
+    set_error,
+    set_result,
+)
+
+
+st.set_page_config(
+    page_title="SpoilerAlert",
+    page_icon="🎬",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+
+BLANK_USERNAME_ERROR = UiError(
+    title="A username belongs in the starring role.",
+    message="Enter the public Letterboxd username you want to analyze.",
+    action="Add a username, then start the story again.",
+)
+
+TMDB_METADATA_CACHE_VERSION = "tmdb-public-metadata-v1"
+_TMDB_CREDENTIAL_PROVIDER: ContextVar[Callable[[], str | None] | None] = ContextVar(
+    "tmdb_credential_provider",
+    default=None,
+)
+
+
+class _UncacheableMetadata(Exception):
+    """Internal control flow ensuring misses and failures never enter the cache."""
+
+
+@contextmanager
+def tmdb_credential_scope(
+    provider: Callable[[], str | None],
+) -> Iterator[None]:
+    """Make one generation-local credential provider available to cache misses."""
+    token = _TMDB_CREDENTIAL_PROVIDER.set(provider)
+    try:
+        yield
+    finally:
+        _TMDB_CREDENTIAL_PROVIDER.reset(token)
+
+
+@st.cache_data(ttl=86400, max_entries=2048, show_spinner=False)
+def _cached_lookup_movie_metadata(
+    normalized_title: str,
+    release_year: int | None,
+    configuration_version: str,
+) -> MovieMetadata:
+    """Cache only successful public metadata using non-secret arguments."""
+    del configuration_version
+    provider = _TMDB_CREDENTIAL_PROVIDER.get()
+    if provider is None:
+        raise _UncacheableMetadata
+    try:
+        api_key = provider()
+        if not api_key:
+            raise _UncacheableMetadata
+        metadata = lookup_movie_metadata(normalized_title, release_year, api_key)
+    except _UncacheableMetadata:
+        raise
+    except Exception:
+        raise _UncacheableMetadata from None
+    if metadata is None:
+        raise _UncacheableMetadata
+    return metadata
+
+
+def lookup_cached_movie_metadata(
+    title: str,
+    release_year: int | None,
+) -> MovieMetadata | None:
+    """Return a cached successful lookup while retrying every miss or failure."""
+    normalized_title = normalize_title(title)
+    if not normalized_title:
+        return None
+    try:
+        return _cached_lookup_movie_metadata(
+            normalized_title,
+            release_year,
+            TMDB_METADATA_CACHE_VERSION,
+        )
+    except _UncacheableMetadata:
+        return None
+
+
+def lookup_cached_movie_metadata_with_key(
+    title: str,
+    release_year: int | None,
+    _api_key: str,
+) -> MovieMetadata | None:
+    """Adapt the application cache boundary to the pure enrichment interface."""
+    return lookup_cached_movie_metadata(title, release_year)
+
+
+def _render_landing() -> None:
+    render_hero()
+    submitted_username = render_generator_form()
+    render_features()
+    render_footer()
+
+    if submitted_username is None:
+        return
+    if not submitted_username.strip().lstrip("@"):
+        set_error(st.session_state, BLANK_USERNAME_ERROR)
+        st.rerun()
+        return
+
+    begin_generation(st.session_state, submitted_username)
+    st.rerun()
+
+
+def _run_generation() -> None:
+    username = st.session_state["username"]
+    status = None
+
+    try:
+        status, progress = render_loading_shell()
+        status.update(
+            label="Opening your complete Letterboxd diary…",
+            state="running",
+            expanded=True,
+        )
+        entries = get_rich_diary_entries(username)
+        progress.progress(25, text="Complete diary loaded")
+
+        status.update(
+            label="Adding optional film details…",
+            state="running",
+            expanded=True,
+        )
+        try:
+            api_key = get_tmdb_api_key(st.secrets)
+            if api_key is None:
+                enriched = enrich_diary_entries(entries, None)
+            else:
+                with tmdb_credential_scope(lambda: api_key):
+                    enriched = enrich_diary_entries(
+                        entries,
+                        api_key,
+                        lookup=lookup_cached_movie_metadata_with_key,
+                    )
+        except Exception:  # noqa: BLE001 - enrichment is explicitly optional
+            logging.warning(
+                "TMDB enrichment unavailable; continuing without movie metadata."
+            )
+            enriched = tuple(
+                EnrichedViewing(diary=entry, metadata=None) for entry in entries
+            )
+        progress.progress(50, text="Optional film details checked")
+
+        status.update(
+            label="Finding the patterns in your movie year…",
+            state="running",
+            expanded=True,
+        )
+        stats = compute_enhanced_stats(username, entries, enriched)
+        progress.progress(75, text="Viewing patterns analyzed")
+
+        status.update(
+            label="Designing all six cinematic story cards…",
+            state="running",
+            expanded=True,
+        )
+        cards = tuple(render_story_cards(stats))
+        if (
+            len(cards) != len(CARD_SLUG_ORDER)
+            or tuple(card.slug for card in cards) != CARD_SLUG_ORDER
+        ):
+            raise IncompleteStoryError("The renderer must return exactly six cards.")
+
+        progress.progress(100, text="Your Wrapped is complete")
+        status.update(
+            label="Your Wrapped is ready.",
+            state="complete",
+            expanded=False,
+        )
+        set_result(st.session_state, stats, cards)
+        st.rerun()
+        return
+    except Exception as exc:  # noqa: BLE001 - all failures become safe UI state
+        logging.exception("Wrapped generation failed for username %r", username)
+        set_error(st.session_state, map_exception(exc))
+        if status is not None:
+            try:
+                status.update(
+                    label="The analysis was interrupted.",
+                    state="error",
+                    expanded=True,
+                )
+            except Exception:  # noqa: BLE001 - error state must still rerun safely
+                logging.exception("Failed to update the interrupted status UI")
+        st.rerun()
+        return
+
+
+def _render_result_stage() -> None:
+    try:
+        cards = st.session_state["wrapped_cards"]
+    except KeyError:
+        cards = ()
+    result_payload = cards or st.session_state["image_bytes"]
+    if render_result(st.session_state["stats"], result_payload):
+        reset_generation(st.session_state)
+        st.rerun()
+
+
+def _render_error_stage() -> None:
+    render_error(st.session_state["ui_error"])
+    try_again = st.button("Try Again", width="stretch")
+    render_footer()
+    if try_again:
+        reset_generation(st.session_state)
+        st.rerun()
+
+
+def render_current_stage() -> None:
+    """Render exactly one stage from the current per-session state."""
+    stage = st.session_state["stage"]
+    if stage == "landing":
+        _render_landing()
+    elif stage == "generating":
+        _run_generation()
+    elif stage == "result":
+        _render_result_stage()
+    elif stage == "error":
+        _render_error_stage()
+
+
+def main() -> None:
+    load_styles()
+    initialize_state(st.session_state)
+    render_header()
+    render_current_stage()
+
+
+if __name__ == "__main__":
+    main()
