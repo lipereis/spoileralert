@@ -41,6 +41,47 @@ def render_generator_form() -> str | None:
     return username if submitted else None
 
 
+def render_csv_uploader_form() -> tuple[str, bytes] | None:
+    """Render the diary-export fallback form and return (username, csv
+    bytes) only once a file has been submitted.
+
+    This path never talks to Letterboxd, so it keeps working even when a
+    hosting provider's shared IP is blocked by Letterboxd's anti-bot
+    protection.
+    """
+    with st.expander("Blocked by Letterboxd? Upload your diary export instead"):
+        with st.form("csv_generator_form", clear_on_submit=False):
+            st.markdown(
+                """
+              <section class="generator-panel__intro">
+                <p>Export your data from Letterboxd's
+                <strong>Settings → Import &amp; Export</strong> page, then upload
+                the <code>diary.csv</code> file from the downloaded ZIP here.
+                This works even when Letterboxd is blocking this server.</p>
+              </section>
+                """,
+                unsafe_allow_html=True,
+            )
+            display_name = st.text_input(
+                "Display name (optional)",
+                placeholder="e.g. nmcassa",
+            )
+            uploaded_file = st.file_uploader(
+                "diary.csv",
+                type=["csv"],
+            )
+            submitted = st.form_submit_button(
+                "Generate My Wrapped from CSV",
+                width="stretch",
+            )
+        if submitted and uploaded_file is None:
+            st.warning("Choose a diary.csv file before submitting.")
+
+    if not submitted or uploaded_file is None:
+        return None
+    return display_name, uploaded_file.getvalue()
+
+
 def render_loading_shell() -> tuple[Any, Any]:
     """Render stable primitives for the real four-operation pipeline."""
     st.markdown(

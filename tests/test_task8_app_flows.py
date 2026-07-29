@@ -119,7 +119,7 @@ class Task8AppFlowTests(unittest.TestCase):
         self.assertEqual(reset_app.session_state["stage"], "landing")
         self.assertEqual(
             [button.label for button in reset_app.button],
-            ["Generate My Wrapped"],
+            ["Generate My Wrapped", "Generate My Wrapped from CSV"],
         )
 
     def test_invalid_profile_enters_safe_error_and_try_again_returns_to_landing(self):

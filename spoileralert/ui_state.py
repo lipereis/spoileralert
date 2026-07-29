@@ -27,6 +27,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "ui_error": None,
     "wrapped_cards": (),
     "selected_card_index": 0,
+    "diary_csv_bytes": None,
 }
 
 
@@ -36,8 +37,14 @@ def initialize_state(state: SessionLike) -> None:
         state.setdefault(key, value)
 
 
-def begin_generation(state: SessionLike, username: str) -> None:
-    """Start a fresh generation attempt for a normalized username."""
+def begin_generation(
+    state: SessionLike, username: str, diary_csv_bytes: bytes | None = None
+) -> None:
+    """Start a fresh generation attempt for a normalized username.
+
+    `diary_csv_bytes`, when provided, routes generation through an
+    uploaded Letterboxd diary export instead of live scraping.
+    """
     state["stage"] = "generating"
     state["username"] = username.strip().lstrip("@")
     state["stats"] = None
@@ -45,6 +52,7 @@ def begin_generation(state: SessionLike, username: str) -> None:
     state["ui_error"] = None
     state["wrapped_cards"] = ()
     state["selected_card_index"] = 0
+    state["diary_csv_bytes"] = diary_csv_bytes
 
 
 def set_result(state: SessionLike, stats: Any, cards: Any) -> None:

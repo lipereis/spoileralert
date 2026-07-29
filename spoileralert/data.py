@@ -4,6 +4,8 @@ messy nested diary structure into a plain list of dicts pandas can chew on.
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime
 from typing import Any
 
@@ -28,6 +30,10 @@ class ProfileNotFoundError(Exception):
 
 class EmptyDiaryError(Exception):
     """Raised when the profile has no diary entries for the current year."""
+
+
+class InvalidCsvError(Exception):
+    """Raised when an uploaded file is not a readable Letterboxd diary export."""
 
 
 _NETWORK_EXCEPTION_CLASSES = {
@@ -325,3 +331,86 @@ def get_diary_entries(username: str) -> list[dict]:
         {"title": entry.title, "month": entry.watched_on.month}
         for entry in get_rich_diary_entries(username)
     ]
+
+
+_CSV_REQUIRED_COLUMNS = {"Name", "Date"}
+
+
+def _csv_slug_from_uri(uri: str | None) -> str | None:
+    """Extract a Letterboxd film slug from an export row's short URI."""
+    if not uri:
+        return None
+    trimmed = uri.strip().rstrip("/")
+    if not trimmed:
+        return None
+    return trimmed.rsplit("/", 1)[-1] or None
+
+
+def parse_diary_csv(csv_source: bytes | str, year: int | None = None) -> list[DiaryEntry]:
+    """Parse a Letterboxd `diary.csv` export (Settings -> Import & Export ->
+    Export Your Data) into validated viewings for one calendar year.
+
+    This bypasses scraping entirely, so it works even when Letterboxd is
+    blocking the server's outbound requests. `Watched Date` is preferred
+    over `Date` when both are present, since bulk-imported rows use `Date`
+    for the import date rather than the actual viewing date.
+    """
+    expected_year = datetime.now().year if year is None else year
+    text = csv_source.decode("utf-8-sig") if isinstance(csv_source, bytes) else csv_source
+
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        available_columns = {(name or "").strip() for name in (reader.fieldnames or ())}
+        if not _CSV_REQUIRED_COLUMNS.issubset(available_columns):
+            raise InvalidCsvError(
+                "This file is missing the 'Name' and 'Date' columns expected "
+                "from a Letterboxd diary export."
+            )
+        rows = list(reader)
+    except csv.Error as exc:
+        raise InvalidCsvError("Could not read this file as a CSV export.") from exc
+
+    normalized: list[DiaryEntry] = []
+    for index, raw_row in enumerate(rows):
+        row = {(key or "").strip(): (value or "").strip() for key, value in raw_row.items()}
+        title = row.get("Name")
+        if not title:
+            continue
+
+        date_text = row.get("Watched Date") or row.get("Date")
+        if not date_text:
+            continue
+        watched_on = _watched_date(date_text)
+        if watched_on is None or watched_on.year != expected_year:
+            continue
+
+        normalized.append(
+            DiaryEntry(
+                viewing_id=str(index),
+                title=title,
+                release_year=_optional_int(row.get("Year")),
+                slug=_csv_slug_from_uri(row.get("Letterboxd URI")),
+                watched_on=watched_on,
+                rating=_optional_rating(row.get("Rating")),
+                rewatched=_optional_rewatch(row.get("Rewatch")),
+            )
+        )
+
+    return normalized
+
+
+def get_rich_diary_entries_from_csv(
+    csv_source: bytes | str, year: int | None = None
+) -> list[DiaryEntry]:
+    """CSV-upload counterpart to `get_rich_diary_entries` -- no network calls,
+    so it is immune to Letterboxd blocking the server's IP address.
+    """
+    requested_year = datetime.now().year if year is None else year
+    entries = parse_diary_csv(csv_source, requested_year)
+
+    if not entries:
+        raise EmptyDiaryError(
+            f"This diary export has no entries for {requested_year} to build a Wrapped from."
+        )
+
+    return entries

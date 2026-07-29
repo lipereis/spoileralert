@@ -7,7 +7,13 @@ from html import escape
 
 import streamlit as st
 
-from spoileralert.data import BlockedError, EmptyDiaryError, NetworkError, ProfileNotFoundError
+from spoileralert.data import (
+    BlockedError,
+    EmptyDiaryError,
+    InvalidCsvError,
+    NetworkError,
+    ProfileNotFoundError,
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,12 @@ def map_exception(exc: Exception) -> UiError:
             "There is not enough diary activity yet.",
             "This profile has no public diary entries for the current year.",
             "Add a diary entry for this year on Letterboxd, then try again.",
+        )
+    if isinstance(exc, InvalidCsvError):
+        return UiError(
+            "That file isn't a Letterboxd diary export.",
+            "We could not find the expected columns in this CSV file.",
+            "Export diary.csv from Letterboxd's Settings \u2192 Import & Export page, then upload it here.",
         )
     if isinstance(exc, BlockedError):
         return UiError(

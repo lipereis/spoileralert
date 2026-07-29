@@ -25,6 +25,19 @@ class UiStateTests(unittest.TestCase):
         self.assertIsNone(state["ui_error"])
         self.assertEqual(state["wrapped_cards"], ())
         self.assertEqual(state["selected_card_index"], 0)
+        self.assertIsNone(state["diary_csv_bytes"])
+
+    def test_begin_generation_stores_uploaded_csv_bytes_for_the_run(self):
+        """Would fail if the CSV-upload path lost track of which source to read."""
+        state = {}
+        initialize_state(state)
+
+        begin_generation(state, "cinefan", b"Date,Name\n2026-01-01,Arrival\n")
+
+        self.assertEqual(state["diary_csv_bytes"], b"Date,Name\n2026-01-01,Arrival\n")
+
+        begin_generation(state, "cinefan")
+        self.assertIsNone(state["diary_csv_bytes"])
 
     def test_generation_result_and_reset_lifecycle(self):
         state = {}
@@ -41,6 +54,7 @@ class UiStateTests(unittest.TestCase):
                 "ui_error": None,
                 "wrapped_cards": (),
                 "selected_card_index": 0,
+                "diary_csv_bytes": None,
             },
         )
 
@@ -65,6 +79,7 @@ class UiStateTests(unittest.TestCase):
                 "ui_error": None,
                 "wrapped_cards": (),
                 "selected_card_index": 0,
+                "diary_csv_bytes": None,
             },
         )
 

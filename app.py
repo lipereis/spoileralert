@@ -10,7 +10,11 @@ from contextvars import ContextVar
 import streamlit as st
 
 from components.errors import IncompleteStoryError, UiError, map_exception, render_error
-from components.generator import render_generator_form, render_loading_shell
+from components.generator import (
+    render_csv_uploader_form,
+    render_generator_form,
+    render_loading_shell,
+)
 from components.layout import (
     load_styles,
     render_features,
@@ -20,7 +24,7 @@ from components.layout import (
 )
 from components.result import CARD_SLUG_ORDER, render_result
 from spoileralert.analysis import compute_enhanced_stats
-from spoileralert.data import get_rich_diary_entries
+from spoileralert.data import get_rich_diary_entries, get_rich_diary_entries_from_csv
 from spoileralert.metadata import (
     enrich_diary_entries,
     get_tmdb_api_key,
@@ -130,8 +134,16 @@ def lookup_cached_movie_metadata_with_key(
 def _render_landing() -> None:
     render_hero()
     submitted_username = render_generator_form()
+    csv_submission = render_csv_uploader_form()
     render_features()
     render_footer()
+
+    if csv_submission is not None:
+        display_name, csv_bytes = csv_submission
+        normalized_name = display_name.strip().lstrip("@") or "you"
+        begin_generation(st.session_state, normalized_name, csv_bytes)
+        st.rerun()
+        return
 
     if submitted_username is None:
         return
@@ -146,6 +158,7 @@ def _render_landing() -> None:
 
 def _run_generation() -> None:
     username = st.session_state["username"]
+    diary_csv_bytes = st.session_state.get("diary_csv_bytes")
     status = None
 
     try:
@@ -155,7 +168,10 @@ def _run_generation() -> None:
             state="running",
             expanded=True,
         )
-        entries = get_rich_diary_entries(username)
+        if diary_csv_bytes is not None:
+            entries = get_rich_diary_entries_from_csv(diary_csv_bytes)
+        else:
+            entries = get_rich_diary_entries(username)
         progress.progress(25, text="Complete diary loaded")
 
         status.update(

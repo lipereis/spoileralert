@@ -299,5 +299,77 @@ class RichDiaryTests(unittest.TestCase):
         self.assertEqual(entries, [{"title": "Arrival", "month": 3}])
 
 
+class CsvDiaryTests(unittest.TestCase):
+    def test_parses_export_columns_preferring_watched_date_over_date(self):
+        """Would fail if bulk-import 'Date' were used instead of the true viewing date."""
+        csv_text = (
+            "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+            "2026-11-17,No Hard Feelings,2023,https://boxd.it/bKjdSb,,,,2026-08-23\n"
+        )
+
+        entries = data.parse_diary_csv(csv_text, year=2026)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].title, "No Hard Feelings")
+        self.assertEqual(entries[0].watched_on.isoformat(), "2026-08-23")
+        self.assertEqual(entries[0].release_year, 2023)
+        self.assertEqual(entries[0].slug, "bKjdSb")
+        self.assertIsNone(entries[0].rating)
+        self.assertIsNone(entries[0].rewatched)
+
+    def test_parses_rating_and_rewatch_and_accepts_bytes_with_bom(self):
+        csv_bytes = (
+            "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+            "2026-03-04,Arrival,2016,https://boxd.it/abc,4.5,Yes,,2026-03-04\n"
+        ).encode("utf-8-sig")
+
+        entries = data.parse_diary_csv(csv_bytes, year=2026)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].title, "Arrival")
+        self.assertEqual(entries[0].rating, 4.5)
+        self.assertTrue(entries[0].rewatched)
+
+    def test_falls_back_to_date_when_watched_date_is_blank(self):
+        csv_text = "Date,Name\n2026-05-01,Moonlight\n"
+
+        entries = data.parse_diary_csv(csv_text, year=2026)
+
+        self.assertEqual([entry.watched_on.isoformat() for entry in entries], ["2026-05-01"])
+
+    def test_skips_rows_missing_a_title_or_matching_a_different_year(self):
+        csv_text = (
+            "Date,Name,Watched Date\n"
+            "2026-01-01,,2026-01-01\n"
+            "2025-01-01,Old Film,2025-01-01\n"
+            "2026-02-02,Arrival,2026-02-02\n"
+        )
+
+        entries = data.parse_diary_csv(csv_text, year=2026)
+
+        self.assertEqual([entry.title for entry in entries], ["Arrival"])
+
+    def test_missing_required_columns_raises_invalid_csv_error(self):
+        csv_text = "Title,WatchedOn\nArrival,2026-01-01\n"
+
+        with self.assertRaises(data.InvalidCsvError):
+            data.parse_diary_csv(csv_text, year=2026)
+
+    def test_get_rich_diary_entries_from_csv_raises_empty_diary_when_year_has_no_rows(self):
+        csv_text = "Date,Name\n2020-01-01,Old Film\n"
+
+        with self.assertRaises(data.EmptyDiaryError):
+            data.get_rich_diary_entries_from_csv(csv_text, year=2026)
+
+    def test_get_rich_diary_entries_from_csv_never_touches_the_network(self):
+        """Would fail if the CSV path accidentally called fetch_user/scraping."""
+        csv_text = "Date,Name\n2026-01-01,Arrival\n"
+
+        with patch.object(data, "fetch_user", side_effect=AssertionError("must not fetch")):
+            entries = data.get_rich_diary_entries_from_csv(csv_text, year=2026)
+
+        self.assertEqual([entry.title for entry in entries], ["Arrival"])
+
+
 if __name__ == "__main__":
     unittest.main()

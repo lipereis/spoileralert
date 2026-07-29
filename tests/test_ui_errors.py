@@ -4,7 +4,7 @@ from unittest.mock import patch
 import components.errors as errors
 from components.errors import UiError, map_exception, render_error
 from spoileralert import data
-from spoileralert.data import BlockedError, EmptyDiaryError, ProfileNotFoundError
+from spoileralert.data import BlockedError, EmptyDiaryError, InvalidCsvError, ProfileNotFoundError
 
 
 class _MissingNetworkError(Exception):
@@ -39,6 +39,16 @@ class UiErrorTests(unittest.TestCase):
                 "There is not enough diary activity yet.",
                 "This profile has no public diary entries for the current year.",
                 "Add a diary entry for this year on Letterboxd, then try again.",
+            ),
+        )
+
+    def test_invalid_csv_error_returns_complete_safe_copy(self):
+        self.assert_safe_mapping(
+            InvalidCsvError("secret parser detail"),
+            UiError(
+                "That file isn't a Letterboxd diary export.",
+                "We could not find the expected columns in this CSV file.",
+                "Export diary.csv from Letterboxd's Settings \u2192 Import & Export page, then upload it here.",
             ),
         )
 

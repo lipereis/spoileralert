@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from components import generator, layout
@@ -20,8 +21,16 @@ class _Form:
 
 
 class _StreamlitDouble:
-    def __init__(self, *, submitted: bool = False):
+    def __init__(
+        self,
+        *,
+        submitted: bool = False,
+        uploaded_file: object | None = None,
+        text_input_value: str = "  cinefan  ",
+    ):
         self.submitted = submitted
+        self.uploaded_file = uploaded_file
+        self.text_input_value = text_input_value
         self.markdown_calls: list[tuple[str, bool]] = []
         self.text_input_calls: list[tuple[str, dict[str, object]]] = []
         self.form_calls: list[tuple[str, dict[str, object]]] = []
@@ -29,9 +38,24 @@ class _StreamlitDouble:
         self.status_calls: list[tuple[str, dict[str, object]]] = []
         self.progress_calls: list[tuple[int, dict[str, object]]] = []
         self.form_content_calls: list[tuple[str, bool]] = []
+        self.expander_calls: list[str] = []
+        self.file_uploader_calls: list[tuple[str, dict[str, object]]] = []
+        self.warning_calls: list[str] = []
         self.in_form = False
         self.status_handle = object()
         self.progress_handle = object()
+
+    def expander(self, label: str, **kwargs):
+        self.expander_calls.append(label)
+        return _Form(self)
+
+    def file_uploader(self, label: str, **kwargs):
+        self.file_uploader_calls.append((label, kwargs))
+        self.form_content_calls.append(("file_uploader", self.in_form))
+        return self.uploaded_file
+
+    def warning(self, body: str):
+        self.warning_calls.append(body)
 
     def markdown(self, body: str, *, unsafe_allow_html: bool = False):
         self.markdown_calls.append((body, unsafe_allow_html))
@@ -53,7 +77,7 @@ class _StreamlitDouble:
     def text_input(self, label: str, **kwargs):
         self.text_input_calls.append((label, kwargs))
         self.form_content_calls.append(("text_input", self.in_form))
-        return "  cinefan  "
+        return self.text_input_value
 
     def form_submit_button(self, label: str, **kwargs):
         self.submit_calls.append((label, kwargs))
@@ -152,6 +176,45 @@ class LandingComponentTests(unittest.TestCase):
             "Only public Letterboxd profile information is analyzed. Your data is not permanently stored.",
             trust,
         )
+
+    def test_csv_form_returns_none_without_submission(self):
+        st = _StreamlitDouble(submitted=False)
+        with patch.object(generator, "st", st):
+            self.assertIsNone(generator.render_csv_uploader_form())
+
+        self.assertEqual(st.warning_calls, [])
+
+    def test_csv_form_warns_and_returns_none_when_submitted_without_a_file(self):
+        st = _StreamlitDouble(submitted=True, uploaded_file=None)
+        with patch.object(generator, "st", st):
+            self.assertIsNone(generator.render_csv_uploader_form())
+
+        self.assertEqual(
+            st.warning_calls,
+            ["Choose a diary.csv file before submitting."],
+        )
+
+    def test_csv_form_returns_display_name_and_csv_bytes_after_submission(self):
+        uploaded_file = SimpleNamespace(getvalue=lambda: b"Date,Name\n2026-01-01,Arrival\n")
+        st = _StreamlitDouble(
+            submitted=True,
+            uploaded_file=uploaded_file,
+            text_input_value="  cinefan  ",
+        )
+        with patch.object(generator, "st", st):
+            result = generator.render_csv_uploader_form()
+
+        self.assertEqual(result, ("  cinefan  ", b"Date,Name\n2026-01-01,Arrival\n"))
+        self.assertEqual(st.expander_calls, ["Blocked by Letterboxd? Upload your diary export instead"])
+        self.assertEqual(
+            st.form_calls,
+            [("csv_generator_form", {"clear_on_submit": False})],
+        )
+        self.assertEqual(
+            st.submit_calls,
+            [("Generate My Wrapped from CSV", {"width": "stretch"})],
+        )
+        self.assertEqual(st.warning_calls, [])
 
     def test_loading_shell_returns_status_and_progress_handles(self):
         st = _StreamlitDouble()
