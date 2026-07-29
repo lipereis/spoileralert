@@ -7,6 +7,29 @@ from typing import Any
 import streamlit as st
 
 
+def render_sample_button() -> bool:
+    """Render the zero-input demo entry point and report a click.
+
+    Nobody should need a Letterboxd account, an export, or an unblocked host
+    to see what this app produces.
+    """
+    st.markdown(
+        """
+      <section class="generator-panel__intro">
+        <p class="generator-panel__eyebrow">START HERE</p>
+        <h2>See it in one click.</h2>
+        <p>Generate the complete six-card story from a sample diary. No account,
+        no export, nothing to install.</p>
+      </section>
+        """,
+        unsafe_allow_html=True,
+    )
+    return st.button(
+        "See a sample Wrapped",
+        width="stretch",
+    )
+
+
 def render_generator_form() -> str | None:
     """Render the public-profile form and return input only on submission."""
     with st.form("generator_form", clear_on_submit=False):
@@ -16,6 +39,9 @@ def render_generator_form() -> str | None:
             <p class="generator-panel__eyebrow">YOUR DIARY, DIRECTED</p>
             <h2>Ready for your close-up?</h2>
             <p>Enter a public Letterboxd username to turn this year's complete diary into a cinematic story.</p>
+            <p>Reading a live profile needs a host Letterboxd is willing to answer.
+            It works when you run SpoilerAlert on your own machine, but shared cloud
+            addresses are often refused — use the diary export above there.</p>
           </section>
             """,
             unsafe_allow_html=True,
@@ -55,7 +81,7 @@ def render_csv_uploader_form(
     distinct.
     """
     with st.expander(
-        "Blocked by Letterboxd? Upload your diary export instead",
+        "Use your own diary — upload your Letterboxd export",
         expanded=expanded,
     ):
         with st.form(form_key, clear_on_submit=False):
@@ -64,8 +90,10 @@ def render_csv_uploader_form(
               <section class="generator-panel__intro">
                 <p>Export your data from Letterboxd's
                 <strong>Settings → Import &amp; Export</strong> page, then upload
-                the <code>diary.csv</code> file from the downloaded ZIP here.
-                This works even when Letterboxd is blocking this server.</p>
+                the <code>diary.csv</code> file from the downloaded ZIP here.</p>
+                <p>This reads the file here and never contacts Letterboxd, so it
+                is the dependable route — it works even when Letterboxd refuses
+                requests from this server.</p>
               </section>
                 """,
                 unsafe_allow_html=True,

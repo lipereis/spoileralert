@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 wrapped_*.png
+wrapped_preview/
 .env
 .streamlit/secrets.toml

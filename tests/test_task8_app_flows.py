@@ -71,29 +71,63 @@ def _run_fixture_app() -> None:
         app_module.main()
 
 
+def _click(app: AppTest, label: str) -> AppTest:
+    """Click by visible label so landing reordering cannot silently retarget."""
+    return next(button for button in app.button if button.label == label).click().run()
+
+
+def _type_username(app: AppTest, value: str) -> None:
+    """Fill the live-profile field by label, since it carries no widget key.
+
+    A keyed landing widget would break these flows: a rerun cycle leaves the
+    landing elements in the tree after the stage changes, and Streamlit has
+    already discarded the keyed state they point at.
+    """
+    field = next(
+        element for element in app.text_input if element.label == "Letterboxd username"
+    )
+    field.input(value)
+
+
 def _submitted_app(scenario: str) -> AppTest:
     app = AppTest.from_function(_run_fixture_app, default_timeout=30).run()
     app.session_state["_task8_scenario"] = scenario
-    app.text_input[0].input("cinefan")
-    return app.button[0].click().run()
+    _type_username(app, "cinefan")
+    return _click(app, "Generate My Wrapped")
 
 
-def _run_blocked_app() -> None:
-    """Run the real coordinator against a host-level Letterboxd block."""
-    from unittest.mock import patch
+def _run_seeded_error_app() -> None:
+    """Start directly in a genuine error stage.
+
+    Rendering the landing page first would leave its trailing widgets in the
+    test element tree, because a shorter error render does not overwrite every
+    delta path the longer landing render wrote. Seeding the stage keeps each
+    assertion about what the error stage itself produced.
+    """
+    import streamlit as st
 
     import app as app_module
-    from spoileralert.data import BlockedError
+    from components.errors import map_exception
+    from spoileralert.data import BlockedError, ProfileNotFoundError
+    from spoileralert.ui_state import initialize_state, set_error
 
-    def fetch_diary(_username: str):
-        raise BlockedError("raw blocked diary url detail")
+    initialize_state(st.session_state)
+    if not st.session_state.get("_task8_error_seeded"):
+        failure: Exception = (
+            BlockedError("raw blocked diary url detail")
+            if st.session_state.get("_task8_error_kind") == "blocked"
+            else ProfileNotFoundError("raw upstream profile detail")
+        )
+        set_error(st.session_state, map_exception(failure))
+        st.session_state["_task8_error_seeded"] = True
 
-    with (
-        patch.object(app_module, "get_rich_diary_entries", side_effect=fetch_diary),
-        patch.object(app_module, "get_tmdb_api_key", return_value=None),
-        patch.object(app_module.logging, "exception"),
-    ):
-        app_module.main()
+    app_module.main()
+
+
+def _seeded_error_app(kind: str) -> AppTest:
+    app = AppTest.from_function(_run_seeded_error_app, default_timeout=30)
+    app.session_state["_task8_error_kind"] = kind
+    return app.run()
 
 
 def _run_csv_app() -> None:
@@ -120,6 +154,23 @@ def _run_csv_app() -> None:
 
     def refuse_scraping(_username: str):
         raise AssertionError("the upload path must not reach Letterboxd")
+
+    with (
+        patch.object(app_module, "get_rich_diary_entries", side_effect=refuse_scraping),
+        patch.object(app_module, "get_tmdb_api_key", return_value=None),
+        patch.object(app_module.logging, "warning"),
+    ):
+        app_module.main()
+
+
+def _run_demo_app() -> None:
+    """Run the real landing page with scraping and TMDB unavailable."""
+    from unittest.mock import patch
+
+    import app as app_module
+
+    def refuse_scraping(_username: str):
+        raise AssertionError("the sample must not reach Letterboxd")
 
     with (
         patch.object(app_module, "get_rich_diary_entries", side_effect=refuse_scraping),
@@ -170,10 +221,14 @@ class Task8AppFlowTests(unittest.TestCase):
         self.assertEqual(reset_app.session_state["stage"], "landing")
         self.assertEqual(
             [button.label for button in reset_app.button],
-            ["Generate My Wrapped", "Generate My Wrapped from CSV"],
+            [
+                "See a sample Wrapped",
+                "Generate My Wrapped from CSV",
+                "Generate My Wrapped",
+            ],
         )
 
-    def test_invalid_profile_enters_safe_error_and_try_again_returns_to_landing(self):
+    def test_invalid_profile_enters_safe_error_without_leaking_upstream_text(self):
         app = _submitted_app("invalid")
 
         self.assertEqual([exception.message for exception in app.exception], [])
@@ -182,17 +237,36 @@ class Task8AppFlowTests(unittest.TestCase):
         self.assertIn("The username may be misspelled, private, or unavailable.", rendered)
         self.assertNotIn("raw upstream profile detail", rendered)
 
-        app = next(button for button in app.button if button.label == "Try Again").click().run()
+    def test_retry_only_error_returns_to_landing_without_offering_an_upload(self):
+        app = _seeded_error_app("profile")
+
+        self.assertEqual([exception.message for exception in app.exception], [])
+        self.assertEqual([button.label for button in app.button], ["Try Again"])
+        self.assertEqual(len(app.get("file_uploader")), 0)
+
+        app = _click(app, "Try Again")
         self.assertEqual([exception.message for exception in app.exception], [])
         self.assertEqual(app.session_state["stage"], "landing")
+
+    def test_sample_button_alone_produces_the_full_six_card_story(self):
+        """Would fail if a first-time visitor could not see the product without
+        an account, an export, or a host Letterboxd is willing to answer.
+        """
+        app = AppTest.from_function(_run_demo_app, default_timeout=90).run()
+        app = _click(app, "See a sample Wrapped")
+
+        self.assertEqual([exception.message for exception in app.exception], [])
+        self.assertEqual(app.session_state["stage"], "result")
+        self.assertEqual(app.session_state["username"], "cinephile")
+        self.assertEqual(len(app.session_state["wrapped_cards"]), 6)
+        self.assertEqual(len(app.download_button), 8)
+        self.assertEqual(app.session_state["stats"].total_viewing_count, 28)
 
     def test_blocked_host_offers_the_upload_instead_of_a_doomed_retry(self):
         """Would fail if a shared-IP block left the retry button as the only
         action, which reruns the same blocked request forever.
         """
-        app = AppTest.from_function(_run_blocked_app, default_timeout=30).run()
-        app.text_input[0].input("cinefan")
-        app = app.button[0].click().run()
+        app = _seeded_error_app("blocked")
 
         self.assertEqual([exception.message for exception in app.exception], [])
         self.assertEqual(app.session_state["stage"], "error")
@@ -202,10 +276,11 @@ class Task8AppFlowTests(unittest.TestCase):
         self.assertIn("diary.csv", rendered)
         self.assertNotIn("raw blocked diary url detail", rendered)
 
-        labels = [button.label for button in app.button]
-        self.assertIn("Generate My Wrapped from CSV", labels)
-        self.assertIn("Start Over", labels)
-        self.assertNotIn("Try Again", labels)
+        self.assertEqual(
+            [button.label for button in app.button],
+            ["Generate My Wrapped from CSV", "Start Over"],
+        )
+        self.assertEqual(len(app.get("file_uploader")), 1)
 
     def test_uploaded_export_reaches_a_six_card_result_without_scraping(self):
         """Would fail if the scraping-free path could not carry a real export

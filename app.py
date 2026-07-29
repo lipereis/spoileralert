@@ -14,6 +14,7 @@ from components.generator import (
     render_csv_uploader_form,
     render_generator_form,
     render_loading_shell,
+    render_sample_button,
 )
 from components.layout import (
     load_styles,
@@ -33,6 +34,7 @@ from spoileralert.metadata import (
 )
 from spoileralert.models import EnrichedViewing, MovieMetadata
 from spoileralert.render import render_story_cards
+from spoileralert.sample import SAMPLE_DISPLAY_NAME, sample_diary_csv_bytes
 from spoileralert.ui_state import (
     begin_generation,
     initialize_state,
@@ -141,10 +143,22 @@ def _start_csv_generation(csv_submission: tuple[str, bytes]) -> None:
 
 def _render_landing() -> None:
     render_hero()
-    submitted_username = render_generator_form()
+    # The demo and the upload both work on any host, so they come before the
+    # live-profile form that a blocked host cannot serve.
+    sample_clicked = render_sample_button()
     csv_submission = render_csv_uploader_form()
+    submitted_username = render_generator_form()
     render_features()
     render_footer()
+
+    if sample_clicked:
+        begin_generation(
+            st.session_state,
+            SAMPLE_DISPLAY_NAME,
+            sample_diary_csv_bytes(),
+        )
+        st.rerun()
+        return
 
     if csv_submission is not None:
         _start_csv_generation(csv_submission)

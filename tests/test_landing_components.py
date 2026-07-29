@@ -27,10 +27,13 @@ class _StreamlitDouble:
         submitted: bool = False,
         uploaded_file: object | None = None,
         text_input_value: str = "  cinefan  ",
+        button_clicked: bool = False,
     ):
         self.submitted = submitted
         self.uploaded_file = uploaded_file
         self.text_input_value = text_input_value
+        self.button_clicked = button_clicked
+        self.button_calls: list[tuple[str, dict[str, object]]] = []
         self.markdown_calls: list[tuple[str, bool]] = []
         self.text_input_calls: list[tuple[str, dict[str, object]]] = []
         self.form_calls: list[tuple[str, dict[str, object]]] = []
@@ -56,6 +59,10 @@ class _StreamlitDouble:
 
     def warning(self, body: str):
         self.warning_calls.append(body)
+
+    def button(self, label: str, **kwargs):
+        self.button_calls.append((label, kwargs))
+        return self.button_clicked
 
     def markdown(self, body: str, *, unsafe_allow_html: bool = False):
         self.markdown_calls.append((body, unsafe_allow_html))
@@ -167,6 +174,11 @@ class LandingComponentTests(unittest.TestCase):
                 ("markdown", True),
             ],
         )
+        self.assertIn(
+            "run SpoilerAlert on your own machine",
+            "".join(body for body, _ in submitted.markdown_calls),
+        )
+
         intro, trust = (body for body, _ in submitted.markdown_calls)
         self.assertIn('class="generator-panel__intro"', intro)
         self.assertIn("</section>", intro)
@@ -209,7 +221,7 @@ class LandingComponentTests(unittest.TestCase):
             st.expander_calls,
             [
                 (
-                    "Blocked by Letterboxd? Upload your diary export instead",
+                    "Use your own diary — upload your Letterboxd export",
                     {"expanded": True},
                 )
             ],
@@ -249,6 +261,29 @@ class LandingComponentTests(unittest.TestCase):
             st.form_calls,
             [("csv_recovery_form", {"clear_on_submit": False})],
         )
+
+    def test_sample_button_reports_clicks_and_needs_no_input(self):
+        """Would fail if seeing the product required an account, an export, or
+        an unblocked host.
+        """
+        idle = _StreamlitDouble(button_clicked=False)
+        with patch.object(generator, "st", idle):
+            self.assertFalse(generator.render_sample_button())
+
+        clicked = _StreamlitDouble(button_clicked=True)
+        with patch.object(generator, "st", clicked):
+            self.assertTrue(generator.render_sample_button())
+
+        self.assertEqual(
+            clicked.button_calls,
+            [("See a sample Wrapped", {"width": "stretch"})],
+        )
+        self.assertEqual(clicked.text_input_calls, [])
+        self.assertEqual(clicked.file_uploader_calls, [])
+
+        promise = "".join(body for body, _ in clicked.markdown_calls)
+        self.assertIn("See it in one click.", promise)
+        self.assertIn("No account", promise)
 
     def test_loading_shell_returns_status_and_progress_handles(self):
         st = _StreamlitDouble()

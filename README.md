@@ -1,10 +1,11 @@
 # SpoilerAlert 🎬
 
-SpoilerAlert turns a public Letterboxd profile's complete current-calendar-year
-diary into a deterministic cinema recap. Every submitted public profile is
-analyzed independently, every diary viewing is counted, and rewatches remain
-separate viewings. A successful run produces six shareable 1080×1920 PNG cards
-and one in-memory ZIP containing those exact files.
+SpoilerAlert turns a complete current-calendar-year Letterboxd diary into a
+deterministic cinema recap, reading it from a bundled sample, an uploaded
+`diary.csv` export, or a public profile. Every run is analyzed independently,
+every diary viewing is counted, and rewatches remain separate viewings. A
+successful run produces six shareable 1080×1920 PNG cards and one in-memory ZIP
+containing those exact files.
 
 ## What the analysis means
 
@@ -154,6 +155,25 @@ when a title is missing or ambiguous, the complete Letterboxd overview and
 timeline still work and all six cards still exist. Metadata-dependent cards
 show limited-data or unavailable-data copy rather than unsupported claims.
 
+## Three ways in
+
+The landing page offers its entry points in order of how dependable they are:
+
+1. **See a sample Wrapped** renders the complete six-card story from a bundled
+   demo diary. It needs no account, no export, and no reachable Letterboxd, so
+   the deployed link always demonstrates itself in one click.
+2. **Upload your Letterboxd export** reads a `diary.csv` locally and never
+   contacts Letterboxd, so it works on any host.
+3. **Enter a Letterboxd username** reads a live public profile. This depends on
+   Letterboxd answering the machine the app runs on, which holds when you run it
+   locally but frequently fails on shared cloud addresses.
+
+The sample is emitted as a Letterboxd export and parsed by the same reader an
+upload uses, so a demo run exercises the real parsing, analysis, and rendering
+path rather than a separate fixture. Its watch dates are anchored to the running
+year and spread across the elapsed part of it, so the demo never shows viewings
+dated in the future and never ages out of the current-year scope.
+
 ## When Letterboxd blocks the server
 
 Letterboxd's anti-bot protection answers some requests with HTTP 403, most
@@ -169,8 +189,8 @@ directly beneath itself and labels its secondary control **Start Over** rather
 than **Try Again**, so the one path that can still succeed is available where
 the failure happened.
 
-The **Blocked by Letterboxd? Upload your diary export instead** form is that
-path, and it opens expanded on the landing page rather than hidden behind a
+The **Use your own diary — upload your Letterboxd export** form is that path,
+and it opens expanded above the username field rather than hidden behind a
 collapsed expander. Export your data from Letterboxd's **Settings → Import &
 Export → Export Your Data**, then upload the `diary.csv` file from the emailed
 ZIP. Parsing is local and makes no network request, so it keeps working while
@@ -200,6 +220,7 @@ reported as a wrong-file error rather than an empty diary.
 app.py                     Streamlit coordinator
 components/                Landing, loading, error, and result gallery UI
 spoileralert/data.py       Full-year Letterboxd diary and diary.csv normalization
+spoileralert/sample.py     Bundled demo diary emitted as a Letterboxd export
 spoileralert/metadata.py   Optional TMDB matching and enrichment
 spoileralert/analysis.py   Overview, DNA, director, and timeline analysis
 spoileralert/personality.py
@@ -268,8 +289,11 @@ responses needs the `diary.csv` upload path described above, not a key.
 
 ## Privacy and limitations
 
-- Only public Letterboxd profile information is read; profile results and card
-  bytes live in the active Streamlit session and are not permanently stored.
+- Only public Letterboxd profile information is read, and an uploaded export is
+  parsed in memory for that session alone. Diary data, results, and card bytes
+  live in the active Streamlit session and are not permanently stored.
+- The sample diary is bundled demo content in `spoileralert/sample.py`. It is
+  not anyone's real viewing history.
 - Movie enrichment is deduplicated by normalized title and release year within
   a generation. Only successful public normalized movie metadata is globally
   cached (24-hour TTL, 2,048-entry bound); user results, rendered cards,

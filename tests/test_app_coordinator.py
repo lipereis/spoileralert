@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from unittest.mock import Mock, patch
 
 import streamlit
@@ -8,6 +9,7 @@ import streamlit
 with patch.object(streamlit, "set_page_config"):
     import app
 from components.errors import UiError
+from spoileralert.data import parse_diary_csv
 from spoileralert.models import RenderedCard
 
 
@@ -60,6 +62,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "render_hero"),
             patch.object(app, "render_generator_form", return_value="  \t "),
             patch.object(app, "render_csv_uploader_form", return_value=None),
+            patch.object(app, "render_sample_button", return_value=False),
             patch.object(app, "render_features"),
             patch.object(app, "render_footer"),
             patch.object(app, "get_rich_diary_entries", fetch),
@@ -91,6 +94,7 @@ class AppCoordinatorTests(unittest.TestCase):
             patch.object(app, "render_hero"),
             patch.object(app, "render_generator_form", return_value="  @  "),
             patch.object(app, "render_csv_uploader_form", return_value=None),
+            patch.object(app, "render_sample_button", return_value=False),
             patch.object(app, "render_features"),
             patch.object(app, "render_footer"),
             patch.object(app, "render_loading_shell", return_value=(_StatusHandle(), _ProgressHandle())),
@@ -106,6 +110,43 @@ class AppCoordinatorTests(unittest.TestCase):
             "A username belongs in the starring role.",
         )
         self.assertEqual(st.rerun_calls, 1)
+
+    def test_sample_click_starts_a_demo_run_without_input_or_scraping(self):
+        """Would fail if the one-click demo needed a username or reached
+        Letterboxd, which is exactly what a visitor cannot rely on.
+        """
+        state = {
+            "stage": "landing",
+            "username": "",
+            "stats": None,
+            "image_bytes": None,
+            "ui_error": None,
+        }
+        st = _AppStreamlitDouble(state)
+        fetch = Mock(side_effect=AssertionError("the sample must not scrape"))
+
+        with (
+            patch.object(app, "st", st),
+            patch.object(app, "render_hero"),
+            patch.object(app, "render_sample_button", return_value=True),
+            patch.object(app, "render_csv_uploader_form", return_value=None),
+            patch.object(app, "render_generator_form", return_value=None),
+            patch.object(app, "render_features"),
+            patch.object(app, "render_footer"),
+            patch.object(app, "get_rich_diary_entries", fetch),
+        ):
+            app.render_current_stage()
+
+        fetch.assert_not_called()
+        self.assertEqual(state["stage"], "generating")
+        self.assertEqual(state["username"], "cinephile")
+        self.assertIsNone(state["ui_error"])
+        self.assertEqual(st.rerun_calls, 1)
+
+        # The demo travels the same upload route, so it needs no second pipeline.
+        parsed = parse_diary_csv(state["diary_csv_bytes"])
+        self.assertEqual(len(parsed), 28)
+        self.assertTrue(all(entry.watched_on.year == date.today().year for entry in parsed))
 
     def test_generating_runs_each_enhanced_operation_once_then_result_rerun_does_not_repeat_it(self):
         state = {
