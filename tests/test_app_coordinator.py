@@ -280,6 +280,81 @@ class AppCoordinatorTests(unittest.TestCase):
             [("Try Again", {"width": "stretch"})],
         )
 
+    def test_upload_recoverable_error_offers_the_upload_beside_a_restart(self):
+        """Would fail if a host-level block left a retry as the only action,
+        since that retry hits the same blocked path again.
+        """
+        error = UiError(
+            "Letterboxd blocked this server.",
+            "Safe message",
+            "Safe action",
+            allow_csv_recovery=True,
+        )
+        state = {
+            "stage": "error",
+            "username": "cinefan",
+            "stats": None,
+            "image_bytes": None,
+            "ui_error": error,
+        }
+        st = _AppStreamlitDouble(state)
+
+        with (
+            patch.object(app, "st", st),
+            patch.object(app, "render_error"),
+            patch.object(app, "render_footer"),
+            patch.object(app, "render_csv_uploader_form", return_value=None) as uploader,
+        ):
+            app.render_current_stage()
+
+        uploader.assert_called_once_with(form_key="csv_recovery_form")
+        self.assertEqual(state["stage"], "error")
+        self.assertEqual(
+            st.button_calls,
+            [("Start Over", {"width": "stretch"})],
+        )
+
+    def test_error_stage_upload_starts_a_csv_generation_without_scraping(self):
+        """Would fail if recovering from the error screen scraped the blocked
+        profile instead of reading the uploaded export.
+        """
+        state = {
+            "stage": "error",
+            "username": "cinefan",
+            "stats": None,
+            "image_bytes": None,
+            "ui_error": UiError(
+                "Blocked",
+                "Safe message",
+                "Safe action",
+                allow_csv_recovery=True,
+            ),
+        }
+        st = _AppStreamlitDouble(state)
+        fetch = Mock(side_effect=AssertionError("fetch must not run"))
+
+        with (
+            patch.object(app, "st", st),
+            patch.object(app, "render_error"),
+            patch.object(app, "render_footer") as footer,
+            patch.object(
+                app,
+                "render_csv_uploader_form",
+                return_value=("  @Cinefan  ", b"Date,Name\n2026-01-01,Arrival\n"),
+            ),
+            patch.object(app, "get_rich_diary_entries", fetch),
+        ):
+            app.render_current_stage()
+
+        fetch.assert_not_called()
+        footer.assert_not_called()
+        self.assertEqual(state["stage"], "generating")
+        self.assertEqual(state["username"], "Cinefan")
+        self.assertEqual(state["diary_csv_bytes"], b"Date,Name\n2026-01-01,Arrival\n")
+        self.assertIsNone(state["ui_error"])
+        self.assertEqual(st.button_calls, [])
+        self.assertEqual(st.rerun_calls, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

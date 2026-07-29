@@ -78,6 +78,57 @@ def _submitted_app(scenario: str) -> AppTest:
     return app.button[0].click().run()
 
 
+def _run_blocked_app() -> None:
+    """Run the real coordinator against a host-level Letterboxd block."""
+    from unittest.mock import patch
+
+    import app as app_module
+    from spoileralert.data import BlockedError
+
+    def fetch_diary(_username: str):
+        raise BlockedError("raw blocked diary url detail")
+
+    with (
+        patch.object(app_module, "get_rich_diary_entries", side_effect=fetch_diary),
+        patch.object(app_module, "get_tmdb_api_key", return_value=None),
+        patch.object(app_module.logging, "exception"),
+    ):
+        app_module.main()
+
+
+def _run_csv_app() -> None:
+    """Run the real pipeline from uploaded diary bytes, never scraping."""
+    from datetime import date
+    from unittest.mock import patch
+
+    import streamlit as st
+
+    import app as app_module
+    from spoileralert.ui_state import begin_generation, initialize_state
+
+    initialize_state(st.session_state)
+    if not st.session_state.get("_task8_csv_seeded"):
+        year = date.today().year
+        export = (
+            "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Watched Date\n"
+            f"{year}-01-05,Arrival,2016,https://boxd.it/aaa,4.5,No,{year}-01-05\n"
+            f"{year}-02-11,Whiplash,2014,https://boxd.it/bbb,5,No,{year}-02-11\n"
+            f"{year}-02-12,Arrival,2016,https://boxd.it/ccc,4.5,Yes,{year}-02-12\n"
+        )
+        begin_generation(st.session_state, "cinefan", export.encode("utf-8"))
+        st.session_state["_task8_csv_seeded"] = True
+
+    def refuse_scraping(_username: str):
+        raise AssertionError("the upload path must not reach Letterboxd")
+
+    with (
+        patch.object(app_module, "get_rich_diary_entries", side_effect=refuse_scraping),
+        patch.object(app_module, "get_tmdb_api_key", return_value=None),
+        patch.object(app_module.logging, "warning"),
+    ):
+        app_module.main()
+
+
 def _run_seeded_result_app() -> None:
     """Start directly at a genuine rendered result for reset interaction testing."""
     import streamlit as st
@@ -134,6 +185,42 @@ class Task8AppFlowTests(unittest.TestCase):
         app = next(button for button in app.button if button.label == "Try Again").click().run()
         self.assertEqual([exception.message for exception in app.exception], [])
         self.assertEqual(app.session_state["stage"], "landing")
+
+    def test_blocked_host_offers_the_upload_instead_of_a_doomed_retry(self):
+        """Would fail if a shared-IP block left the retry button as the only
+        action, which reruns the same blocked request forever.
+        """
+        app = AppTest.from_function(_run_blocked_app, default_timeout=30).run()
+        app.text_input[0].input("cinefan")
+        app = app.button[0].click().run()
+
+        self.assertEqual([exception.message for exception in app.exception], [])
+        self.assertEqual(app.session_state["stage"], "error")
+
+        rendered = "\n".join(element.value for element in app.markdown)
+        self.assertIn("Letterboxd blocked this server.", rendered)
+        self.assertIn("diary.csv", rendered)
+        self.assertNotIn("raw blocked diary url detail", rendered)
+
+        labels = [button.label for button in app.button]
+        self.assertIn("Generate My Wrapped from CSV", labels)
+        self.assertIn("Start Over", labels)
+        self.assertNotIn("Try Again", labels)
+
+    def test_uploaded_export_reaches_a_six_card_result_without_scraping(self):
+        """Would fail if the scraping-free path could not carry a real export
+        through analysis and rendering while Letterboxd is unreachable.
+        """
+        app = AppTest.from_function(_run_csv_app, default_timeout=60).run()
+
+        self.assertEqual([exception.message for exception in app.exception], [])
+        self.assertEqual(app.session_state["stage"], "result")
+        self.assertEqual(len(app.session_state["wrapped_cards"]), 6)
+        self.assertEqual(len(app.download_button), 8)
+
+        stats = app.session_state["stats"]
+        self.assertEqual(stats.total_viewing_count, 3)
+        self.assertEqual(stats.enriched_film_count, 0)
 
     def test_no_key_and_metadata_failure_both_reach_six_card_result(self):
         for scenario in ("no-key", "metadata-failure"):

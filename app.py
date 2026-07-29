@@ -131,6 +131,14 @@ def lookup_cached_movie_metadata_with_key(
     return lookup_cached_movie_metadata(title, release_year)
 
 
+def _start_csv_generation(csv_submission: tuple[str, bytes]) -> None:
+    """Route one uploaded diary export into a fresh generation attempt."""
+    display_name, csv_bytes = csv_submission
+    normalized_name = display_name.strip().lstrip("@") or "you"
+    begin_generation(st.session_state, normalized_name, csv_bytes)
+    st.rerun()
+
+
 def _render_landing() -> None:
     render_hero()
     submitted_username = render_generator_form()
@@ -139,10 +147,7 @@ def _render_landing() -> None:
     render_footer()
 
     if csv_submission is not None:
-        display_name, csv_bytes = csv_submission
-        normalized_name = display_name.strip().lstrip("@") or "you"
-        begin_generation(st.session_state, normalized_name, csv_bytes)
-        st.rerun()
+        _start_csv_generation(csv_submission)
         return
 
     if submitted_username is None:
@@ -256,10 +261,24 @@ def _render_result_stage() -> None:
 
 
 def _render_error_stage() -> None:
-    render_error(st.session_state["ui_error"])
-    try_again = st.button("Try Again", width="stretch")
+    error = st.session_state["ui_error"]
+    render_error(error)
+
+    # Offering only a retry would strand anyone whose failure a retry cannot
+    # fix, such as a host-level Letterboxd block.
+    csv_recovery = bool(getattr(error, "allow_csv_recovery", False))
+    if csv_recovery:
+        csv_submission = render_csv_uploader_form(form_key="csv_recovery_form")
+        if csv_submission is not None:
+            _start_csv_generation(csv_submission)
+            return
+
+    restart = st.button(
+        "Start Over" if csv_recovery else "Try Again",
+        width="stretch",
+    )
     render_footer()
-    if try_again:
+    if restart:
         reset_generation(st.session_state)
         st.rerun()
 

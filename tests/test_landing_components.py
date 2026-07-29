@@ -38,7 +38,7 @@ class _StreamlitDouble:
         self.status_calls: list[tuple[str, dict[str, object]]] = []
         self.progress_calls: list[tuple[int, dict[str, object]]] = []
         self.form_content_calls: list[tuple[str, bool]] = []
-        self.expander_calls: list[str] = []
+        self.expander_calls: list[tuple[str, dict[str, object]]] = []
         self.file_uploader_calls: list[tuple[str, dict[str, object]]] = []
         self.warning_calls: list[str] = []
         self.in_form = False
@@ -46,7 +46,7 @@ class _StreamlitDouble:
         self.progress_handle = object()
 
     def expander(self, label: str, **kwargs):
-        self.expander_calls.append(label)
+        self.expander_calls.append((label, kwargs))
         return _Form(self)
 
     def file_uploader(self, label: str, **kwargs):
@@ -205,7 +205,15 @@ class LandingComponentTests(unittest.TestCase):
             result = generator.render_csv_uploader_form()
 
         self.assertEqual(result, ("  cinefan  ", b"Date,Name\n2026-01-01,Arrival\n"))
-        self.assertEqual(st.expander_calls, ["Blocked by Letterboxd? Upload your diary export instead"])
+        self.assertEqual(
+            st.expander_calls,
+            [
+                (
+                    "Blocked by Letterboxd? Upload your diary export instead",
+                    {"expanded": True},
+                )
+            ],
+        )
         self.assertEqual(
             st.form_calls,
             [("csv_generator_form", {"clear_on_submit": False})],
@@ -215,6 +223,32 @@ class LandingComponentTests(unittest.TestCase):
             [("Generate My Wrapped from CSV", {"width": "stretch"})],
         )
         self.assertEqual(st.warning_calls, [])
+
+    def test_csv_form_is_open_by_default_and_can_be_collapsed(self):
+        """Would fail if the one path that survives a host block stayed hidden
+        behind a closed expander.
+        """
+        default_state = _StreamlitDouble()
+        with patch.object(generator, "st", default_state):
+            generator.render_csv_uploader_form()
+
+        collapsed = _StreamlitDouble()
+        with patch.object(generator, "st", collapsed):
+            generator.render_csv_uploader_form(expanded=False)
+
+        self.assertEqual(default_state.expander_calls[0][1], {"expanded": True})
+        self.assertEqual(collapsed.expander_calls[0][1], {"expanded": False})
+
+    def test_csv_form_key_is_configurable_so_two_copies_can_coexist(self):
+        """Would fail if the error-stage copy reused the landing form key."""
+        st = _StreamlitDouble()
+        with patch.object(generator, "st", st):
+            generator.render_csv_uploader_form(form_key="csv_recovery_form")
+
+        self.assertEqual(
+            st.form_calls,
+            [("csv_recovery_form", {"clear_on_submit": False})],
+        )
 
     def test_loading_shell_returns_status_and_progress_handles(self):
         st = _StreamlitDouble()

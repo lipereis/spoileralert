@@ -41,16 +41,24 @@ def render_generator_form() -> str | None:
     return username if submitted else None
 
 
-def render_csv_uploader_form() -> tuple[str, bytes] | None:
-    """Render the diary-export fallback form and return (username, csv
-    bytes) only once a file has been submitted.
+def render_csv_uploader_form(
+    *,
+    expanded: bool = True,
+    form_key: str = "csv_generator_form",
+) -> tuple[str, bytes] | None:
+    """Render the diary-export form and return (username, csv bytes) only
+    once a file has been submitted.
 
     This path never talks to Letterboxd, so it keeps working even when a
     hosting provider's shared IP is blocked by Letterboxd's anti-bot
-    protection.
+    protection. `form_key` keeps the landing and error copies of this form
+    distinct.
     """
-    with st.expander("Blocked by Letterboxd? Upload your diary export instead"):
-        with st.form("csv_generator_form", clear_on_submit=False):
+    with st.expander(
+        "Blocked by Letterboxd? Upload your diary export instead",
+        expanded=expanded,
+    ):
+        with st.form(form_key, clear_on_submit=False):
             st.markdown(
                 """
               <section class="generator-panel__intro">

@@ -161,15 +161,22 @@ often when they come from a shared cloud IP address such as Streamlit
 Community Cloud's. This is a property of the host, not of the submitted
 profile or of any account. Those responses become a dedicated `BlockedError`
 and a specific error panel naming the hosting provider's address as the cause,
-instead of the generic unexpected-failure copy. Retrying immediately does not
-help, so the copy does not suggest it.
+instead of the generic unexpected-failure copy.
 
-The landing page's **Blocked by Letterboxd? Upload your diary export instead**
-expander is the supported way through an active block. Export your data from
-Letterboxd's **Settings → Import & Export → Export Your Data**, then upload the
-`diary.csv` file from the emailed ZIP. Parsing is local and makes no network
-request, so it keeps working while scraping is blocked, and it produces the same
-six cards and ZIP.
+Because a retry reruns the same blocked request, a block never offers a bare
+retry as its only action. The error panel renders the diary-export upload
+directly beneath itself and labels its secondary control **Start Over** rather
+than **Try Again**, so the one path that can still succeed is available where
+the failure happened.
+
+The **Blocked by Letterboxd? Upload your diary export instead** form is that
+path, and it opens expanded on the landing page rather than hidden behind a
+collapsed expander. Export your data from Letterboxd's **Settings → Import &
+Export → Export Your Data**, then upload the `diary.csv` file from the emailed
+ZIP. Parsing is local and makes no network request, so it keeps working while
+scraping is blocked, and it produces the same six cards and ZIP. A wrong file is
+reported as `InvalidCsvError` and can be replaced in place, since that failure
+is also upload-recoverable.
 
 The reader requires the `Name` and `Date` columns and additionally reads
 `Watched Date`, `Year`, `Letterboxd URI`, `Rating`, and `Rewatch` when present.

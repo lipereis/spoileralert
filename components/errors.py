@@ -21,6 +21,12 @@ class UiError:
     title: str
     message: str
     action: str
+    allow_csv_recovery: bool = False
+    """Whether uploading a diary export can succeed where this attempt failed.
+
+    Set for failures a live profile retry cannot resolve, so the error stage
+    can offer the scraping-free path instead of only a doomed retry.
+    """
 
 
 class IncompleteStoryError(RuntimeError):
@@ -52,13 +58,17 @@ def map_exception(exc: Exception) -> UiError:
             "That file isn't a Letterboxd diary export.",
             "We could not find the expected columns in this CSV file.",
             "Export diary.csv from Letterboxd's Settings \u2192 Import & Export page, then upload it here.",
+            allow_csv_recovery=True,
         )
     if isinstance(exc, BlockedError):
         return UiError(
             "Letterboxd blocked this server.",
             "Letterboxd's anti-bot protection is blocking requests from this "
             "hosting provider's shared IP address, not from your account.",
-            "Try again later, or run SpoilerAlert on your own machine for reliable access.",
+            "Retrying will not help, but uploading your diary export will: "
+            "get diary.csv from Letterboxd's Settings \u2192 Import & Export page "
+            "and upload it below for your complete Wrapped.",
+            allow_csv_recovery=True,
         )
     if isinstance(exc, (NetworkError, ConnectionError, TimeoutError)):
         return UiError(

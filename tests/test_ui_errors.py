@@ -49,6 +49,7 @@ class UiErrorTests(unittest.TestCase):
                 "That file isn't a Letterboxd diary export.",
                 "We could not find the expected columns in this CSV file.",
                 "Export diary.csv from Letterboxd's Settings \u2192 Import & Export page, then upload it here.",
+                allow_csv_recovery=True,
             ),
         )
 
@@ -59,9 +60,40 @@ class UiErrorTests(unittest.TestCase):
                 "Letterboxd blocked this server.",
                 "Letterboxd's anti-bot protection is blocking requests from this "
                 "hosting provider's shared IP address, not from your account.",
-                "Try again later, or run SpoilerAlert on your own machine for reliable access.",
+                "Retrying will not help, but uploading your diary export will: "
+                "get diary.csv from Letterboxd's Settings \u2192 Import & Export page "
+                "and upload it below for your complete Wrapped.",
+                allow_csv_recovery=True,
             ),
         )
+
+    def test_only_upload_recoverable_failures_offer_the_upload_path(self):
+        """Would fail if a retry-only failure advertised an irrelevant upload,
+        or if a host-level block hid the one path that can still succeed.
+        """
+        for exc in (BlockedError("blocked"), InvalidCsvError("wrong file")):
+            with self.subTest(exception_type=type(exc).__name__):
+                self.assertTrue(map_exception(exc).allow_csv_recovery)
+
+        for exc in (
+            ProfileNotFoundError("missing"),
+            EmptyDiaryError("empty"),
+            NetworkError("offline"),
+            ConnectionError("offline"),
+            TimeoutError("slow"),
+            errors.IncompleteStoryError("five cards"),
+            RuntimeError("unexpected"),
+        ):
+            with self.subTest(exception_type=type(exc).__name__):
+                self.assertFalse(map_exception(exc).allow_csv_recovery)
+
+    def test_blocked_copy_names_the_upload_without_advising_a_bare_retry(self):
+        """Would fail if the block copy sent users back to the doomed path."""
+        error = map_exception(BlockedError("blocked"))
+
+        self.assertIn("diary.csv", error.action)
+        self.assertIn("Retrying will not help", error.action)
+        self.assertNotIn("Try again later", error.action)
 
     def test_network_and_unexpected_errors_return_complete_safe_copy(self):
         network_copy = UiError(
